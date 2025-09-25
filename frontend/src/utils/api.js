@@ -1,4 +1,5 @@
-const API_BASE = 'http://localhost:' + process.env.PORT;
+// const API_BASE = 'http://localhost:' + process.env.URL;
+const API_BASE = process.env.FRONTEND_BASE_URL;
 const API_KEY = process.env.FIREBASE_API_KEY; // Same as in backend .env
 
 async function callApi(endpoint, options = {}) {
