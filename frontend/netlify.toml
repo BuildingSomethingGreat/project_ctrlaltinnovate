@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build-frontend && npm install && npm run start"
+  command = "cd ../backend npm install && npm run build-frontend"
   publish = "backend/frontend-build"
 
 [[redirects]]
