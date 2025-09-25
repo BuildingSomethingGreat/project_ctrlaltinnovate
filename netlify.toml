@@ -1,0 +1,8 @@
+[build]
+  command = "npm run build-frontend && npm install && npm run start"
+  publish = "backend/frontend-build"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
