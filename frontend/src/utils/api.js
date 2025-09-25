@@ -1,5 +1,5 @@
 const API_BASE = 'http://localhost:4242';
-const API_KEY = 'AIzaSyBB-ExXfQEIjrB8pMORGMiBdDcRWK3NdXY'; // Same as in backend .env
+const API_KEY = process.env.FIREBASE_API_KEY; // Same as in backend .env
 
 async function callApi(endpoint, options = {}) {
     console.log(`Calling API: ${endpoint} with options:`, options); // Debug log
