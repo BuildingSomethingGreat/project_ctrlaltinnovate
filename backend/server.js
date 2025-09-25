@@ -597,5 +597,5 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 80;
 app.listen(PORT, () => console.log(`API listening on port ${PORT}`));
