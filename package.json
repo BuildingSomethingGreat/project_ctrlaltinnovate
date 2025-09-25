@@ -4,8 +4,8 @@
     "private": true,
     "scripts": {
       "install": "cd frontend && npm install && cd ../backend && npm install",
-      "heroku-postbuild": "cd backend && npm run build-frontend",
-      "start": "cd backend && npm start",
+      "build": "cd backend && npm run build-frontend",
+      "heroku-postbuild": "cd backend && npm start",
       "dev": "cd backend && npm run dev"
     },
     "engines": {
