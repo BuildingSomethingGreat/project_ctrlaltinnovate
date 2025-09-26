@@ -1,5 +1,5 @@
 // const API_BASE = process.env.REACT_APP_FRONTEND_BASE_URL || 'http://localhost:4242';
-const API_BASE = 'https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com/';
+const API_BASE = 'https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com';
 
 
 const API_KEY = process.env.REACT_APP_FIREBASE_API_KEY;
