@@ -1,14 +1,19 @@
-// const API_BASE = 'http://localhost:' + process.env.URL;
-const API_BASE = process.env.FRONTEND_BASE_URL;
-const API_KEY = process.env.FIREBASE_API_KEY; // Same as in backend .env
+// const API_BASE = process.env.REACT_APP_FRONTEND_BASE_URL || 'http://localhost:4242';
+const API_BASE = 'https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com/';
+
+
+const API_KEY = process.env.REACT_APP_FIREBASE_API_KEY;
 
 async function callApi(endpoint, options = {}) {
-    console.log(`Calling API: ${endpoint} with options:`, options); // Debug log
+  console.log('Hey');
+  console.log(`Calling API: ${endpoint} with options:`, options); // Debug log
   const headers = {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${API_KEY}`,
     ...options.headers
   };
+
+  console.log('API_BASE', API_BASE);
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
