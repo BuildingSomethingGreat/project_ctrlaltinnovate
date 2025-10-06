@@ -7,6 +7,7 @@ const { nanoid } = require('nanoid');
 const mustache = require('mustache');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY)
@@ -28,6 +29,18 @@ if (!admin.apps.length) {
 }
 const db = admin.firestore();
 
+const { Storage } = require('@google-cloud/storage');
+
+// Initialize Firebase Storage
+const storage = new Storage({
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  credentials: {
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+    private_key: privateKey
+  }
+});
+
+const bucket = storage.bucket(`${process.env.FIREBASE_PROJECT_ID}.firebasestorage.app`);
 
 const app = express();
 
@@ -119,6 +132,53 @@ function renderPaymentPage(product, link) {
   const html = mustache.render(template, { product, link });
   return html;
 }
+
+// Serve the uploaded files statically
+app.use('/uploads', express.static('uploads'));
+
+/**
+ * Image upload endpoint
+ * POST /api/upload
+ */
+app.post('/api/upload', bodyParser.raw({ type: 'image/*', limit: '10mb' }), async (req, res) => {
+  try {
+    const fileBuffer = req.body; // The raw file buffer
+    const contentType = req.headers['content-type']; // Get the content type from the headers
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}`; // Generate a unique file name
+
+    if (!fileBuffer || !contentType) {
+      return res.status(400).send({ error: 'No file uploaded or invalid content type' });
+    }
+
+    // Create a reference to the file in Firebase Storage
+    const blob = bucket.file(`uploads/${fileName}`);
+    const blobStream = blob.createWriteStream({
+      metadata: {
+        contentType: contentType
+      }
+    });
+
+    blobStream.on('error', (err) => {
+      console.error('Blob stream error:', err);
+      res.status(500).send({ error: 'Failed to upload image' });
+    });
+
+    blobStream.on('finish', async () => {
+      // Make the file publicly accessible
+      await blob.makePublic();
+
+      // Construct the public URL
+      const publicUrl = `https://storage.googleapis.com/${bucket.name}/${blob.name}`;
+      res.json({ imageUrl: publicUrl });
+    });
+
+    // Write the file buffer to Firebase Storage
+    blobStream.end(fileBuffer);
+  } catch (err) {
+    console.error('Image upload error:', err);
+    res.status(500).send({ error: 'Failed to upload image' });
+  }
+});
 
 // --- Routes ---
 
