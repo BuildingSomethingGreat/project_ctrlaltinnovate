@@ -7,7 +7,6 @@ const { nanoid } = require('nanoid');
 const mustache = require('mustache');
 const fs = require('fs');
 const path = require('path');
-const multer = require('multer');
 
 const Stripe = require('stripe');
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY)
@@ -54,6 +53,7 @@ app.use(express.static(path.join(__dirname, '../frontend/build')));
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
+
   try {
     if (process.env.STRIPE_WEBHOOK_SECRET) {
       event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
@@ -69,13 +69,47 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object;
+
+        // Extract metadata from the session
+        const { sellerId, productId } = session.metadata;
+
+        // Reference the seller in the database
+        const sellerSnap = await db.collection('sellers').doc(sellerId).get();
+        if (!sellerSnap.exists) {
+          console.error(`Seller not found: ${sellerId}`);
+          return res.status(404).send({ error: 'Seller not found' });
+        }
+        const seller = sellerSnap.data();
+
+        // Initiate a payout to the seller
+        try {
+          const payout = await stripe.transfers.create({
+            amount: session.amount_total, // Total amount in cents
+            currency: session.currency,
+            destination: seller.stripeAccountId, // Seller's Stripe account ID
+            metadata: {
+              productId,
+              sellerId,
+              orderId: session.payment_intent || session.id
+            }
+          });
+          console.log('Payout initiated:', payout);
+        } catch (err) {
+          console.error('Failed to create payout:', err);
+        }
+
+        // Update the product document to set isSold to true
+        const productRef = db.collection('products').doc(productId);
+        await productRef.update({ isSold: true });
+
+        // Save the order details in the database
         const orderRef = db.collection('orders').doc(session.payment_intent || session.id);
         const orderDoc = {
           orderId: session.payment_intent || session.id,
           checkoutSessionId: session.id,
           linkId: session.metadata?.linkId,
-          productId: session.metadata?.productId,
-          sellerId: session.metadata?.sellerId,
+          productId,
+          sellerId,
           amount_total: session.amount_total,
           currency: session.currency,
           buyer_email: session.customer_details?.email || null,
@@ -84,38 +118,17 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
           createdAt: new Date().toISOString()
         };
         await orderRef.set(orderDoc);
-        // decrement inventory if necessary
-        if (session.metadata?.productId) {
-          const pRef = db.collection('products').doc(session.metadata.productId);
-          const pSnap = await pRef.get();
-          if (pSnap.exists) {
-            const p = pSnap.data();
-            if (typeof p.inventory === 'number' && p.inventory > 0) {
-              await pRef.update({ inventory: p.inventory - 1 });
-              if (p.inventory - 1 <= 0) await pRef.update({ active: false });
-            }
-          }
-        }
+
+        console.log('Order saved and product updated.');
         break;
       }
-      case 'account.updated': {
-        const account = event.data.object;
-        const sellersRef = db.collection('sellers');
-        const q = await sellersRef.where('stripeAccountId', '==', account.id).get();
-        q.forEach(async (doc) => {
-          await doc.ref.update({
-            stripeAccountStatus: account,
-            updatedAt: new Date().toISOString()
-          });
-        });
-        break;
-      }
+
       default:
-        // console.log(`Unhandled event type ${event.type}`);
+        console.log(`Unhandled event type ${event.type}`);
         break;
     }
   } catch (err) {
-    console.error('handle event err', err);
+    console.error('Webhook handler error:', err);
   }
 
   res.json({ received: true });
@@ -284,27 +297,52 @@ app.post('/api/links', async (req, res) => {
   try {
     const { productId, sellerId, expiresAt } = req.body;
     if (!productId) return res.status(400).send({ error: 'productId required' });
-    
+
+    // Fetch the product
+    const productSnap = await db.collection('products').doc(productId).get();
+    if (!productSnap.exists) return res.status(404).send({ error: 'product not found' });
+    const product = productSnap.data();
+
+    // Fetch the seller
+    const sellerSnap = await db.collection('sellers').doc(sellerId).get();
+    if (!sellerSnap.exists) return res.status(404).send({ error: 'seller not found' });
+    const seller = sellerSnap.data();
+
+    // Check if the seller has completed onboarding
+    let onboardingUrl = null;
+    if (!seller.stripeAccountStatus?.charges_enabled || !seller.stripeAccountStatus?.payouts_enabled) {
+      const origin = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+      const accountLink = await stripe.accountLinks.create({
+        account: seller.stripeAccountId,
+        refresh_url: `${origin}/onboard/refresh?sellerId=${sellerId}`,
+        return_url: `${origin}/onboard/success?sellerId=${sellerId}`,
+        type: 'account_onboarding'
+      });
+      onboardingUrl = accountLink.url;
+    }
+
+    // Create the payment link
     const linkId = nanoid(7).toUpperCase();
     const linkDoc = {
       linkId,
       productId,
-      sellerId, // Add sellerId to link document
+      sellerId,
       createdAt: new Date().toISOString(),
       expiresAt: expiresAt || null
     };
-    
+
     await db.collection('links').doc(linkId).set(linkDoc);
-    
-    // If sellerId provided, update product's sellerId
-    if (sellerId) {
-      await db.collection('products').doc(productId).update({ sellerId });
-    }
-    
+
     const pageUrl = `${process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`}/p/${linkId}`;
-    res.json({ linkId, pageUrl });
+
+    // Respond with the payment link and onboarding URL (if applicable)
+    res.json({
+      linkId,
+      pageUrl,
+      onboardingUrl
+    });
   } catch (err) {
-    console.error(err);
+    console.error('Error creating payment link:', err);
     res.status(500).send({ error: err.message });
   }
 });
@@ -316,29 +354,55 @@ app.post('/api/links', async (req, res) => {
 app.get('/p/:linkId', async (req, res) => {
   try {
     const { linkId } = req.params;
-    const linkSnap = await db.collection('links').doc(linkId).get();
-    if (!linkSnap.exists) return res.status(404).send('Link not found');
-    const link = linkSnap.data();
-    const pSnap = await db.collection('products').doc(link.productId).get();
-    if (!pSnap.exists) return res.status(404).send('Product not found');
-    const product = pSnap.data();
-    const sellerSnap = await db.collection('sellers').doc(product.sellerId).get();
-    const seller = sellerSnap.exists ? sellerSnap.data() : null;
+    console.log(`Rendering payment page for link ${linkId}`);
 
-    const html = renderPaymentPage(product, { linkId, pageUrl: `${req.protocol}://${req.get('host')}/p/${linkId}`, seller });
+    if (!linkId) {
+      console.error('No linkId provided');
+      return res.status(400).send('Link ID is required');
+    }
+
+    // Get link
+    const linkSnap = await db.collection('links').doc(linkId).get();
+    if (!linkSnap.exists) {
+      console.error(`Link not found: ${linkId}`);
+      return res.status(404).send('Link not found');
+    }
+
+    const link = linkSnap.data();
+    console.log('Link data:', link);
+
+    if (!link.productId) {
+      console.error('Link has no productId');
+      return res.status(400).send('Invalid link data');
+    }
+
+    // Get product
+    const pSnap = await db.collection('products').doc(link.productId).get();
+    if (!pSnap.exists) {
+      console.error(`Product not found: ${link.productId}`);
+      return res.status(404).send('Product not found');
+    }
+
+    const product = pSnap.data();
+    console.log('Product data:', product);
+
+    // Ensure all required fields are present
+    if (!product.title || !product.price_cents) {
+      console.error('Product missing required fields');
+      return res.status(400).send('Invalid product data');
+    }
+
+    const html = renderPaymentPage(product, link);
+    console.log('HTML generated successfully');
+
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
   } catch (err) {
-    console.error('render page err', err);
-    res.status(500).send('Server error');
+    console.error('Error rendering payment page:', err);
+    res.status(500).send(`Server error: ${err.message}`);
   }
 });
 
-/**
- * Create Stripe Checkout Session
- * POST /api/create-checkout-session
- * body: { linkId, success_url, cancel_url }
- */
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
     console.log('Creating checkout session...', req.body); // Debug log
@@ -387,11 +451,17 @@ app.post('/api/create-checkout-session', async (req, res) => {
       mode: 'payment',
       success_url: success_url || `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: cancel_url || `${origin}/p/${linkId}`,
-      metadata: {
-        linkId,
-        productId: product.productId,
-        sellerId: seller.sellerId
-      }
+      payment_intent_data: {
+        metadata: {
+          linkId,
+          productId: product.productId,
+          sellerId: seller.sellerId,
+          sellerEmail: seller.email, // Add seller email
+          sellerStripeAccountId: seller.stripeAccountId, // Add Stripe account ID
+          sellerBusinessName: seller.businessProfile?.name || 'Unknown', // Add seller business name
+          sellerCountry: seller.country || 'US' // Add seller country
+        }
+    }
     };
 
     console.log('Creating Stripe session with params:', sessionParams); // Debug log
