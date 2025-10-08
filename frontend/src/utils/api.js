@@ -1,4 +1,5 @@
 // const API_BASE = process.env.REACT_APP_FRONTEND_BASE_URL || 'http://localhost:4242';
+// const API_BASE = 'http://localhost:4242'; // Use this for local development
 const API_BASE = 'https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com';
 
 
@@ -29,28 +30,48 @@ async function callApi(endpoint, options = {}) {
 }
 
 export async function createProduct(data) {
-  return callApi('/api/products', {
+  const product = await callApi('/api/products', {
     method: 'POST',
     body: JSON.stringify(data)
   });
+
+  console.log('Created product:', product); // Debug log
+  return product;
 }
 
-export async function createPaymentLink(productId, sellerId, email) {
-  // Create seller first if sellerId not provided
-  if (!sellerId && email) {
+export async function createPaymentLink(paymentLinkData) {
+  const { productId, sellerId, email, expiresAt } = paymentLinkData;
+
+  // Validate required fields
+  if (!productId) {
+    throw new Error('productId is required to create a payment link');
+  }
+
+  // if (!sellerId && email) {
     try {
       const { seller } = await createSeller(email);
-      sellerId = seller.sellerId;
+      paymentLinkData.sellerId = seller.sellerId; // Update sellerId in paymentLinkData
     } catch (err) {
       console.error('Failed to create seller:', err);
       throw new Error('Failed to create seller account');
     }
+  // }
+
+  if (!paymentLinkData.sellerId) {
+    throw new Error('sellerId is required to create a payment link');
   }
 
-  return callApi('/api/links', {
+  // Call the API to create the payment link
+  const response = await callApi('/api/links', {
     method: 'POST',
-    body: JSON.stringify({ productId, sellerId })
+    body: JSON.stringify({
+      productId: paymentLinkData.productId,
+      sellerId: paymentLinkData.sellerId,
+      expiresAt: paymentLinkData.expiresAt || null // Include expiration date if provided
+    })
   });
+
+  return response; // This should include linkId, pageUrl, and onboardingUrl
 }
 
 export async function createSeller(email) {

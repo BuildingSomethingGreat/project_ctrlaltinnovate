@@ -13,7 +13,7 @@ function OnboardingRefresh() {
     const refreshOnboarding = async () => {
       try {
         // Call the onboard endpoint again to get a fresh link
-        const response = await fetch('http://localhost:4242/api/sellers/onboard', {
+        const response = await fetch('/api/sellers/onboard', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -239,12 +239,14 @@ app.post('/api/sellers/onboard', verifyFirebaseToken, async (req, res) => {
 /**
  * Create product
  * POST /api/products
- * body: { sellerId, title, description, price_cents, currency, image_url, inventory }
+ * body: { sellerId, title, description, price_cents, currency, image_url, inventory, checkoutSchema }
  */
 app.post('/api/products', async (req, res) => {
   try {
-    const { sellerId, title, description, price_cents, currency, image_url, inventory } = req.body;
-    if (!sellerId || !title || !price_cents) return res.status(400).send({ error: 'sellerId, title, price_cents required' });
+    const { sellerId, title, description, price_cents, currency, image_url, inventory, checkoutSchema } = req.body;
+    if (!sellerId || !title || !price_cents) {
+      return res.status(400).send({ error: 'sellerId, title, and price_cents are required' });
+    }
 
     const productRef = db.collection('products').doc();
     const product = {
@@ -257,8 +259,16 @@ app.post('/api/products', async (req, res) => {
       image_url: image_url || null,
       inventory: typeof inventory === 'number' ? inventory : null,
       active: true,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      checkoutSchema: checkoutSchema || {
+        theme: 'default', // default theme
+        backgroundColor: '#f7fafc',
+        accentColor: '#2563eb',
+        buttonColor: '#2563eb',
+        textColor: '#0f172a'
+      }
     };
+
     await productRef.set(product);
     res.json({ product });
   } catch (err) {
@@ -296,7 +306,14 @@ app.post('/api/products/:productId/associate', verifyFirebaseToken, async (req, 
 app.post('/api/links', async (req, res) => {
   try {
     const { productId, sellerId, expiresAt } = req.body;
-    if (!productId) return res.status(400).send({ error: 'productId required' });
+
+    if (!productId || typeof productId !== 'string' || productId.trim() === '') {
+      return res.status(400).send({ error: 'Valid productId is required' });
+    }
+
+    if (!sellerId || typeof sellerId !== 'string' || sellerId.trim() === '') {
+      return res.status(400).send({ error: 'Valid sellerId is required' });
+    }
 
     // Fetch the product
     const productSnap = await db.collection('products').doc(productId).get();
@@ -307,19 +324,6 @@ app.post('/api/links', async (req, res) => {
     const sellerSnap = await db.collection('sellers').doc(sellerId).get();
     if (!sellerSnap.exists) return res.status(404).send({ error: 'seller not found' });
     const seller = sellerSnap.data();
-
-    // Check if the seller has completed onboarding
-    let onboardingUrl = null;
-    if (!seller.stripeAccountStatus?.charges_enabled || !seller.stripeAccountStatus?.payouts_enabled) {
-      const origin = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
-      const accountLink = await stripe.accountLinks.create({
-        account: seller.stripeAccountId,
-        refresh_url: `${origin}/onboard/refresh?sellerId=${sellerId}`,
-        return_url: `${origin}/onboard/success?sellerId=${sellerId}`,
-        type: 'account_onboarding'
-      });
-      onboardingUrl = accountLink.url;
-    }
 
     // Create the payment link
     const linkId = nanoid(7).toUpperCase();
@@ -335,11 +339,9 @@ app.post('/api/links', async (req, res) => {
 
     const pageUrl = `${process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`}/p/${linkId}`;
 
-    // Respond with the payment link and onboarding URL (if applicable)
     res.json({
       linkId,
-      pageUrl,
-      onboardingUrl
+      pageUrl
     });
   } catch (err) {
     console.error('Error creating payment link:', err);
