@@ -80,3 +80,18 @@ export async function createSeller(email) {
     body: JSON.stringify({ email })
   });
 }
+
+export async function uploadDigital(productId, file) {
+  if (!productId || !file) throw new Error('productId and file are required');
+
+  const res = await callApi(`/api/products/${productId}/digital`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-filename': encodeURIComponent(file.name)
+    },
+    body: file
+  });
+
+  return res; // { digitalDownload }
+}

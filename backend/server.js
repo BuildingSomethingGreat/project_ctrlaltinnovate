@@ -16,6 +16,11 @@ const { formatPrice } = require('./utils/mustacheHelpers');
 const { verifyFirebaseToken } = require('./middleware/firebaseAuth');
 const privateKey = JSON.parse(process.env.FIREBASE_PRIVATE_KEY).private_key.replace(/\\n/g, '\n');
 
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+const { generateEmailTemplate } = require('./utils/emailTemplate');
+
 // Initialize Firebase Admin SDK
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -41,10 +46,107 @@ const storage = new Storage({
 
 const bucket = storage.bucket(`${process.env.FIREBASE_PROJECT_ID}.firebasestorage.app`);
 
+function sanitizeFilename(name = '') {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 140);
+}
+
+
 const app = express();
 
 // Serve static files from the React frontend app
 app.use(express.static(path.join(__dirname, '../frontend/build')));
+
+/**
+ * Auto-fulfill digital orders:
+ * - Attaches digital file (from product or link snapshot) and emails buyer with product image.
+ * - After buyer email is sent successfully, emails seller that the order was auto-fulfilled.
+ * Returns true if fulfillment email sent to buyer; otherwise false.
+ */
+async function autoFulfillDigitalOrder(session) {
+  try {
+    // Extract refs from metadata
+    const linkId = session.metadata?.linkId;
+    const productId = session.metadata?.productId;
+    const sellerId = session.metadata?.sellerId;
+
+    if (!productId || !sellerId) return false;
+
+    // Fetch docs
+    const [productSnap, sellerSnap, linkSnap] = await Promise.all([
+      db.collection('products').doc(productId).get(),
+      db.collection('sellers').doc(sellerId).get(),
+      linkId ? db.collection('links').doc(linkId).get() : Promise.resolve({ exists: false })
+    ]);
+
+    if (!productSnap.exists || !sellerSnap.exists) return false;
+
+    const product = productSnap.data();
+    const seller = sellerSnap.data();
+    const link = linkSnap.exists ? linkSnap.data() : null;
+
+    // Determine digital asset (prefer product, fallback to link snapshot)
+    const digital = product.digitalDownload || link?.digitalDownload || null;
+    if (!digital?.storagePath) return false;
+
+    // Determine buyer email
+    const buyerEmail = session.customer_details?.email || session.customer_email || null;
+    if (!buyerEmail) return false;
+
+    // Download the file from Storage
+    const fileRef = bucket.file(digital.storagePath);
+    const [buffer] = await fileRef.download();
+
+    // Build buyer email HTML (include product image and order total)
+    const buyerHtml = generateEmailTemplate({
+      appName: 'CtrlAltInnovate',
+      title: 'Your download is ready',
+      message: `Thanks for your purchase of <strong>${product.title}</strong>. Your file is attached to this email.`,
+      details: `
+        ${product.image_url ? `<img src="${product.image_url}" alt="${product.title}" style="max-width:100%; border-radius:8px; margin-bottom:12px;" />` : ''}
+        <div>Order total: ${formatPrice(session.amount_total, product.currency || 'usd')}</div>
+      `
+    });
+
+    // Send buyer email with attachment
+    await resend.emails.send({
+      from: 'ctrlaltinnovate@notifications.edwardstechnology.app',
+      to: buyerEmail,
+      subject: `Your ${product.title} download`,
+      html: buyerHtml,
+      attachments: [
+        {
+          filename: digital.fileName || 'download',
+          content: buffer,
+          contentType: digital.contentType || 'application/octet-stream'
+        }
+      ]
+    });
+
+    // Notify seller of auto-fulfillment (only after buyer email is sent)
+    const sellerHtml = generateEmailTemplate({
+      appName: 'CtrlAltInnovate',
+      title: 'Your order was automatically fulfilled',
+      message: `An order for <strong>${product.title}</strong> was automatically fulfilled via digital delivery.`,
+      details: `
+        <div>Buyer: ${buyerEmail}</div>
+        <div>Amount: ${formatPrice(session.amount_total, product.currency || 'usd')}</div>
+        ${product.image_url ? `<div style="margin-top:12px;"><img src="${product.image_url}" alt="${product.title}" style="max-width:100%; border-radius:8px;" /></div>` : ''}
+      `
+    });
+
+    await resend.emails.send({
+      from:'ctrlaltinnovate@notifications.edwardstechnology.app',
+      to: seller.email,
+      subject: 'Your order was automatically fulfilled',
+      html: sellerHtml
+    });
+
+    return true;
+  } catch (err) {
+    console.error('autoFulfillDigitalOrder failure:', err);
+    return false;
+  }
+}
 
 /**
  * Webhook endpoint
@@ -80,6 +182,29 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
           return res.status(404).send({ error: 'Seller not found' });
         }
         const seller = sellerSnap.data();
+
+        // Reference the product in the database
+        const productSnap = await db.collection('products').doc(productId).get();
+        if (!productSnap.exists) {
+          console.error(`Product not found: ${productId}`);
+          return res.status(404).send({ error: 'Product not found' });
+        }
+        const product = productSnap.data();
+
+        // Send email to seller
+        const emailHtml = generateEmailTemplate({
+          appName: 'CtrlAltInnovate',
+          title: 'New Order Received!',
+          message: `A customer has purchased your product: ${product.title}.`,
+          details: `Order Amount: $${(session.amount_total / 100).toFixed(2)}`
+        });
+
+        await resend.emails.send({
+          from: 'ctrlaltinnovate@notifications.edwardstechnology.app',
+          to: seller.email,
+          subject: 'New Order Received!',
+          html: emailHtml
+        });
 
         // Initiate a payout to the seller
         try {
@@ -118,6 +243,16 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
           createdAt: new Date().toISOString()
         };
         await orderRef.set(orderDoc);
+
+        // ADD: auto-fulfill digital orders (buyer + seller notifications)
+        try {
+          const fulfilled = await autoFulfillDigitalOrder(session);
+          if (!fulfilled) {
+            console.log('No digital download to fulfill or buyer email missing.');
+          }
+        } catch (e) {
+          console.error('Auto-fulfillment error:', e);
+        }
 
         console.log('Order saved and product updated.');
         break;
@@ -229,6 +364,21 @@ app.post('/api/sellers/onboard', verifyFirebaseToken, async (req, res) => {
       type: 'account_onboarding'
     });
 
+    // Send welcome email
+    const emailHtml = generateEmailTemplate({
+      appName: 'CtrlAltInnovate',
+      title: 'Welcome to CtrlAltInnovate!',
+      message: 'Thank you for signing up as a seller. Please complete your onboarding to start receiving payments.',
+      details: `<a href="${accountLink.url}" style="color: #2563eb; text-decoration: none;">Complete Onboarding</a>`
+    });
+
+    await resend.emails.send({
+      from: 'ctrlaltinnovate@notifications.edwardstechnology.app',
+      to: email,
+      subject: 'Welcome to CtrlAltInnovate!',
+      html: emailHtml
+    });
+
     res.json({ sellerId: newSellerId, stripeAccountId: account.id, accountLink: accountLink.url });
   } catch (err) {
     console.error('onboard err', err);
@@ -332,16 +482,23 @@ app.post('/api/links', async (req, res) => {
       productId,
       sellerId,
       createdAt: new Date().toISOString(),
-      expiresAt: expiresAt || null
+      expiresAt: expiresAt || null,
+      digitalDownload: product.digitalDownload || null // snapshot for convenience
     };
+
+    // Compute hasDigital and store it on the link
+    const hasDigital = Boolean(product.digitalDownload && product.digitalDownload.storagePath);
+    linkDoc.hasDigital = hasDigital;
 
     await db.collection('links').doc(linkId).set(linkDoc);
 
-    const pageUrl = `${process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`}/p/${linkId}`;
+    const baseUrl = process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const pageUrl = `${baseUrl}/p/${linkId}${hasDigital ? '?digital=1' : ''}`;
 
     res.json({
       linkId,
-      pageUrl
+      pageUrl,
+      hasDigital
     });
   } catch (err) {
     console.error('Error creating payment link:', err);
@@ -356,87 +513,70 @@ app.post('/api/links', async (req, res) => {
 app.get('/p/:linkId', async (req, res) => {
   try {
     const { linkId } = req.params;
-    console.log(`Rendering payment page for link ${linkId}`);
 
-    if (!linkId) {
-      console.error('No linkId provided');
-      return res.status(400).send('Link ID is required');
-    }
-
-    // Get link
     const linkSnap = await db.collection('links').doc(linkId).get();
-    if (!linkSnap.exists) {
-      console.error(`Link not found: ${linkId}`);
-      return res.status(404).send('Link not found');
-    }
-
+    if (!linkSnap.exists) return res.status(404).send('Link not found');
     const link = linkSnap.data();
-    console.log('Link data:', link);
 
-    if (!link.productId) {
-      console.error('Link has no productId');
-      return res.status(400).send('Invalid link data');
-    }
-
-    // Get product
     const pSnap = await db.collection('products').doc(link.productId).get();
-    if (!pSnap.exists) {
-      console.error(`Product not found: ${link.productId}`);
-      return res.status(404).send('Product not found');
-    }
-
+    if (!pSnap.exists) return res.status(404).send('Product not found');
     const product = pSnap.data();
-    console.log('Product data:', product);
 
-    // Ensure all required fields are present
-    if (!product.title || !product.price_cents) {
-      console.error('Product missing required fields');
-      return res.status(400).send('Invalid product data');
+    // Defaults used by the template
+    product.checkoutSchema = product.checkoutSchema || {
+      backgroundColor: '#f7fafc',
+      buttonColor: '#2563eb',
+      textColor: '#0f172a'
+    };
+    product.price_display = (product.price_cents / 100).toFixed(2);
+
+    // Compute digital flag
+    let hasDigital =
+      Boolean(link.hasDigital) ||
+      Boolean(product.digitalDownload && product.digitalDownload.storagePath);
+
+    // Allow URL override (?digital=1) as fallback
+    if (!hasDigital && (req.query.digital === '1' || req.query.digital === 'true')) {
+      hasDigital = true;
     }
 
-    const html = renderPaymentPage(product, link);
-    console.log('HTML generated successfully');
-
+    const template = fs.readFileSync(path.join(__dirname, 'templates', 'payment_page.mustache'), 'utf8');
+    const html = mustache.render(template, { product, link, hasDigital });
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
   } catch (err) {
-    console.error('Error rendering payment page:', err);
-    res.status(500).send(`Server error: ${err.message}`);
+    console.error('render page err', err);
+    res.status(500).send('Server error');
   }
 });
 
 app.post('/api/create-checkout-session', async (req, res) => {
   try {
-    console.log('Creating checkout session...', req.body); // Debug log
-    const { linkId, success_url, cancel_url } = req.body;
+    const { linkId } = req.body;
     if (!linkId) return res.status(400).send({ error: 'linkId required' });
 
-    // Get link
     const linkSnap = await db.collection('links').doc(linkId).get();
     if (!linkSnap.exists) return res.status(404).send({ error: 'link not found' });
     const link = linkSnap.data();
-    console.log('Link found:', link); // Debug log
 
-    // Get product
-    const pSnap = await db.collection('products').doc(link.productId).get();
-    if (!pSnap.exists) return res.status(404).send({ error: 'product not found' });
-    const product = pSnap.data();
-    console.log('Product found:', product); // Debug log
+    const productSnap = await db.collection('products').doc(link.productId).get();
+    if (!productSnap.exists) return res.status(404).send({ error: 'product not found' });
+    const product = productSnap.data();
 
-    if (!product.sellerId) return res.status(400).send({ error: 'product not assigned to seller' });
-    
-    // Get seller
-    const sellerSnap = await db.collection('sellers').doc(product.sellerId).get();
+    const sellerSnap = await db.collection('sellers').doc(link.sellerId).get();
     if (!sellerSnap.exists) return res.status(404).send({ error: 'seller not found' });
     const seller = sellerSnap.data();
-    console.log('Seller found:', seller); // Debug log
 
-    if (!seller.stripeAccountId) return res.status(400).send({ error: 'seller has no stripe account' });
+    // Determine if this purchase includes a digital download
+    const hasDigital = Boolean(
+      (link && link.hasDigital) ||
+      (product && product.digitalDownload && product.digitalDownload.storagePath)
+    );
 
-    const origin = process.env.FRONTEND_BASE_URL || `${req.protocol}://${req.get('host')}`;
-    
-    // Create session
-    const sessionParams = {
+    const origin = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+    const successUrl = `${origin}/success?session_id={CHECKOUT_SESSION_ID}${hasDigital ? '&digital=1' : ''}`;
+
+    const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [{
         price_data: {
@@ -451,27 +591,18 @@ app.post('/api/create-checkout-session', async (req, res) => {
         quantity: 1
       }],
       mode: 'payment',
-      success_url: success_url || `${origin}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: cancel_url || `${origin}/p/${linkId}`,
-      payment_intent_data: {
-        metadata: {
-          linkId,
-          productId: product.productId,
-          sellerId: seller.sellerId,
-          sellerEmail: seller.email, // Add seller email
-          sellerStripeAccountId: seller.stripeAccountId, // Add Stripe account ID
-          sellerBusinessName: seller.businessProfile?.name || 'Unknown', // Add seller business name
-          sellerCountry: seller.country || 'US' // Add seller country
-        }
-    }
-    };
+      success_url: successUrl, // UPDATED to include digital=1 when applicable
+      cancel_url: `${origin}/p/${linkId}`,
+      metadata: {
+        linkId,
+        productId: product.productId,
+        sellerId: seller.sellerId,
+        // optional: include for downstream logic/debug
+        hasDigital: hasDigital ? '1' : '0'
+      }
+    });
 
-    console.log('Creating Stripe session with params:', sessionParams); // Debug log
-
-    const session = await stripe.checkout.sessions.create(sessionParams);
-    console.log('Session created:', session); // Debug log
-
-    res.json({ url: session.url, id: session.id });
+    res.json({ url: session.url });
   } catch (err) {
     console.error('Create checkout session error:', err);
     res.status(500).send({ error: err.message });
@@ -721,6 +852,53 @@ app.post('/api/seed/seller', async (req, res) => {
   } catch (err) {
     console.error('seed seller err', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Upload a digital file scoped to a product
+app.post('/api/products/:productId/digital', bodyParser.raw({ type: '*/*', limit: '100mb' }), async (req, res) => {
+  try {
+    const { productId } = req.params;
+    if (!productId) return res.status(400).json({ error: 'productId required' });
+
+    // Ensure product exists
+    const pSnap = await db.collection('products').doc(productId).get();
+    if (!pSnap.exists) return res.status(404).json({ error: `product not found: ${productId}` });
+
+    if (!req.body || !req.body.length) return res.status(400).json({ error: 'No file uploaded' });
+
+    console.log(`Uploading digital file for product ${productId}, size: ${req.body.length} bytes`);
+
+    const contentType = req.headers['content-type'] || 'application/octet-stream';
+    const rawName = decodeURIComponent(req.headers['x-filename'] || `digital-${Date.now()}`);
+    const fileName = sanitizeFilename(rawName);
+    const storagePath = `downloads/${productId}/${Date.now()}-${fileName}`;
+
+    // save buffer to GCS
+    await bucket.file(storagePath).save(req.body, {
+      metadata: { contentType, cacheControl: 'private, max-age=0, no-transform' }
+    });
+
+    console.log(`Digital file uploaded: ${storagePath}`);
+
+    const fileSize = Buffer.isBuffer(req.body) ? req.body.length : undefined;
+
+    const digitalDownload = {
+      fileName,
+      contentType,
+      storagePath,
+      fileSize,
+      updatedAt: new Date().toISOString()
+    };
+
+    console.log('Digital download metadata:', digitalDownload);
+
+    await db.collection('products').doc(productId).update({ digitalDownload });
+
+    return res.json({ digitalDownload });
+  } catch (err) {
+    console.error('Upload digital error:', err);
+    return res.status(500).json({ error: `Failed to upload digital file: ${err.message}` });
   }
 });
 

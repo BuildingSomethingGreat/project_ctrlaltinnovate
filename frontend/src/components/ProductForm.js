@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { createProduct, createPaymentLink, createSeller } from '../utils/api'; // Import API functions
+import { createProduct, createPaymentLink, createSeller, uploadDigital } from '../utils/api'; // add uploadDigital
 
 function ProductForm() {
   const [formData, setFormData] = useState({
@@ -14,6 +14,7 @@ function ProductForm() {
     sellerEmail: '', // New field for seller's email
     imageFile: null, // For uploaded image
     imageUrl: '', // For image URL
+    digitalFile: null, // NEW: digital download file
     checkoutSchema: {
       backgroundColor: '#f7fafc',
       buttonColor: '#2563eb',
@@ -103,6 +104,11 @@ function ProductForm() {
 
       const { product } = await createProduct(productData); // Use createProduct from api.js
       console.log('Product created:', product); // Debug log
+
+      // Upload digital file (optional) AFTER product exists so we can scope to productId
+      if (formData.digitalFile) {
+        await uploadDigital(product.productId, formData.digitalFile);
+      }
 
       // Create payment link
       const paymentLinkData = {
@@ -207,6 +213,16 @@ function ProductForm() {
                 type="file"
                 accept="image/*"
                 onChange={(e) => setFormData({ ...formData, imageFile: e.target.files[0] })}
+                style={styles.input}
+              />
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Digital File (Optional)</label>
+              <input
+                type="file"
+                accept="*/*"
+                onChange={(e) => setFormData({ ...formData, digitalFile: e.target.files[0] })}
                 style={styles.input}
               />
             </div>
