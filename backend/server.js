@@ -52,18 +52,7 @@ function sanitizeFilename(name = '') {
 
 function guessContentTypeFromExt(name = '') {
   const ext = (name.split('.').pop() || '').toLowerCase();
-  const map = {
-    pdf: 'application/pdf',
-    png: 'image/png',
-    jpg: 'image/jpeg',
-    jpeg: 'image/jpeg',
-    gif: 'image/gif',
-    webp: 'image/webp',
-    svg: 'image/svg+xml',
-    zip: 'application/zip',
-    txt: 'text/plain',
-    md: 'text/markdown'
-  };
+  const map = { pdf:'application/pdf', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', zip:'application/zip', txt:'text/plain' };
   return map[ext] || 'application/octet-stream';
 }
 
@@ -82,6 +71,38 @@ function buildDigitalDownloadFromUrl(url) {
   } catch {
     return null;
   }
+}
+
+// Helper: fetch a public URL and stage it into Storage, returning a digitalDownload object
+async function stageRemoteUrlToStorage({ productId, url, linkId }) {
+  if (!productId || !url) throw new Error('productId and url are required');
+
+  const doFetch = global.fetch ? global.fetch.bind(global) : (await import('node-fetch')).default;
+  const u = new URL(url);
+  const rawName = decodeURIComponent(u.pathname.split('/').pop() || 'download');
+  const fileName = sanitizeFilename(rawName);
+  const resp = await doFetch(url);
+  if (!resp.ok) throw new Error(`Failed to fetch digital file from URL (${resp.status})`);
+
+  const ab = await resp.arrayBuffer();
+  const buffer = Buffer.from(ab);
+  const contentType = resp.headers.get('content-type') || guessContentTypeFromExt(fileName);
+  const ts = Date.now();
+  const idSeg = linkId ? `${linkId}-` : '';
+  const storagePath = `downloads/${productId}/${idSeg}${ts}-${fileName}`;
+
+  await bucket.file(storagePath).save(buffer, {
+    metadata: { contentType, cacheControl: 'private, max-age=0, no-transform' }
+  });
+
+  return {
+    fileName,
+    contentType,
+    storagePath,
+    fileSize: buffer.length,
+    updatedAt: new Date().toISOString(),
+    contentUrl: url // keep for reference
+  };
 }
 
 const app = express();
@@ -113,7 +134,13 @@ async function autoFulfillDigitalOrder(session) {
     const seller = sellerSnap.data();
     const link = linkSnap.exists ? linkSnap.data() : null;
 
-    const digital = product.digitalDownload || link?.digitalDownload || null;
+    // ADD: normalize digital (fallback to legacy digitalFileUrl)
+    const digital =
+      product.digitalDownload ||
+      link?.digitalDownload ||
+      (product.digitalFileUrl ? buildDigitalDownloadFromUrl(product.digitalFileUrl) : null) ||
+      (link?.digitalFileUrl ? buildDigitalDownloadFromUrl(link.digitalFileUrl) : null);
+
     if (!digital) return false;
 
     const buyerEmail = session.customer_details?.email || session.customer_email || null;
@@ -125,24 +152,27 @@ async function autoFulfillDigitalOrder(session) {
     if (digital.storagePath) {
       const fileRef = bucket.file(digital.storagePath);
       const [buffer] = await fileRef.download();
+      const base64 = Buffer.from(buffer).toString('base64'); // Resend expects base64
       attachment = {
         filename: digital.fileName || 'download',
-        content: buffer,
+        content: base64,
         contentType: digital.contentType || 'application/octet-stream'
       };
     } else if (digital.contentUrl) {
-      // Node 18+ has global fetch; fallback to dynamic import if needed
-      const resp = await (global.fetch
-        ? fetch(digital.contentUrl)
-        : (await import('node-fetch')).default(digital.contentUrl));
+      // Explicit fetch with Node 18+ or dynamic import fallback
+      const doFetch = global.fetch ? global.fetch.bind(global) : (await import('node-fetch')).default;
+      const resp = await doFetch(digital.contentUrl);
       if (resp.ok) {
         const ab = await resp.arrayBuffer();
         const buffer = Buffer.from(ab);
+        const base64 = buffer.toString('base64'); // Resend expects base64
         attachment = {
           filename: digital.fileName || 'download',
-          content: buffer,
+          content: base64,
           contentType: digital.contentType || resp.headers.get('content-type') || 'application/octet-stream'
         };
+      } else {
+        console.warn('Failed to fetch contentUrl for attachment:', digital.contentUrl, resp.status);
       }
     }
 
@@ -165,6 +195,8 @@ async function autoFulfillDigitalOrder(session) {
       html: buyerHtml,
       ...(attachment ? { attachments: [attachment] } : {})
     });
+
+    console.log(attachment)
 
     // Notify seller
     const sellerHtml = generateEmailTemplate({
@@ -444,11 +476,24 @@ app.post('/api/products', async (req, res) => {
     } = req.body;
 
     if (!sellerId || !title || !price_cents) {
-      return res.status(400).send({ error: 'sellerId, title, and price_cents are required' });
+      return res.status(400).json({ error: 'sellerId, title, and price_cents are required' });
     }
 
     const productRef = db.collection('products').doc();
-    const digitalDownload = digitalFileUrl ? buildDigitalDownloadFromUrl(digitalFileUrl) : null;
+
+    // If a public URL is provided, fetch and upload to Storage first
+    let digitalDownload = null;
+    if (digitalFileUrl) {
+      try {
+        digitalDownload = await stageRemoteUrlToStorage({
+          productId: productRef.id,
+          url: digitalFileUrl
+        });
+      } catch (e) {
+        console.error('Failed to stage digitalFileUrl to storage:', e);
+        return res.status(400).json({ error: 'Could not fetch digitalFileUrl' });
+      }
+    }
 
     const product = {
       productId: productRef.id,
@@ -508,17 +553,31 @@ app.post('/api/products/:productId/associate', verifyFirebaseToken, async (req, 
 app.post('/api/links', async (req, res) => {
   try {
     const { productId, sellerId, email, expiresAt, digitalFileUrl } = req.body;
-    if (!productId) return res.status(400).send({ error: 'productId required' });
+    if (!productId) return res.status(400).json({ error: 'productId required' });
 
     const productSnap = await db.collection('products').doc(productId).get();
-    if (!productSnap.exists) return res.status(404).send({ error: 'product not found' });
+    if (!productSnap.exists) return res.status(404).json({ error: 'product not found' });
     const product = productSnap.data();
 
+    // Create linkId first so we can include it in the storage path
     const linkId = nanoid(7).toUpperCase();
 
-    // Use link override if provided, else snapshot product.digitalDownload
-    const urlBasedDownload = digitalFileUrl ? buildDigitalDownloadFromUrl(digitalFileUrl) : null;
-    const linkDigital = urlBasedDownload || product.digitalDownload || null;
+    // If link-level URL provided, stage to Storage; else snapshot product's digitalDownload
+    let linkDigital = null;
+    if (digitalFileUrl) {
+      try {
+        linkDigital = await stageRemoteUrlToStorage({
+          productId,
+          url: digitalFileUrl,
+          linkId
+        });
+      } catch (e) {
+        console.error('Failed to stage link digitalFileUrl to storage:', e);
+        return res.status(400).json({ error: 'Could not fetch link digitalFileUrl' });
+      }
+    } else {
+      linkDigital = product.digitalDownload || null;
+    }
 
     const hasDigital = Boolean(linkDigital && (linkDigital.storagePath || linkDigital.contentUrl));
 
@@ -529,7 +588,7 @@ app.post('/api/links', async (req, res) => {
       email: email || null,
       createdAt: new Date().toISOString(),
       expiresAt: expiresAt || null,
-      digitalDownload: linkDigital, // normalized schema
+      digitalDownload: linkDigital,
       hasDigital
     };
 
@@ -538,10 +597,10 @@ app.post('/api/links', async (req, res) => {
     const baseUrl = process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
     const pageUrl = `${baseUrl}/p/${linkId}${hasDigital ? '?digital=1' : ''}`;
 
-    res.json({ linkId, pageUrl, onboardingUrl: null, hasDigital });
+    res.json({ linkId, pageUrl, hasDigital });
   } catch (err) {
-    console.error(err);
-    res.status(500).send({ error: err.message });
+    console.error('Error creating payment link:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
