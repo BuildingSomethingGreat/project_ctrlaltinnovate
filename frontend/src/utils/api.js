@@ -39,39 +39,16 @@ export async function createProduct(data) {
   return product;
 }
 
-export async function createPaymentLink(paymentLinkData) {
-  const { productId, sellerId, email, expiresAt } = paymentLinkData;
+export async function createPaymentLink(dataOrProductId, sellerId, email) {
+  // Support both old signature and new object payload
+  const payload = typeof dataOrProductId === 'object'
+    ? dataOrProductId
+    : { productId: dataOrProductId, sellerId, email };
 
-  // Validate required fields
-  if (!productId) {
-    throw new Error('productId is required to create a payment link');
-  }
-
-  // if (!sellerId && email) {
-    try {
-      const { seller } = await createSeller(email);
-      paymentLinkData.sellerId = seller.sellerId; // Update sellerId in paymentLinkData
-    } catch (err) {
-      console.error('Failed to create seller:', err);
-      throw new Error('Failed to create seller account');
-    }
-  // }
-
-  if (!paymentLinkData.sellerId) {
-    throw new Error('sellerId is required to create a payment link');
-  }
-
-  // Call the API to create the payment link
-  const response = await callApi('/api/links', {
+  return callApi('/api/links', {
     method: 'POST',
-    body: JSON.stringify({
-      productId: paymentLinkData.productId,
-      sellerId: paymentLinkData.sellerId,
-      expiresAt: paymentLinkData.expiresAt || null // Include expiration date if provided
-    })
+    body: JSON.stringify(payload)
   });
-
-  return response; // This should include linkId, pageUrl, and onboardingUrl
 }
 
 export async function createSeller(email) {

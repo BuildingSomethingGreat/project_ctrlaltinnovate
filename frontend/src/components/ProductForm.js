@@ -15,6 +15,7 @@ function ProductForm() {
     imageFile: null, // For uploaded image
     imageUrl: '', // For image URL
     digitalFile: null, // NEW: digital download file
+    digitalFileUrl: '', // NEW: public URL for digital download (optional)
     checkoutSchema: {
       backgroundColor: '#f7fafc',
       buttonColor: '#2563eb',
@@ -99,7 +100,8 @@ function ProductForm() {
         price_cents: Math.round(parseFloat(formData.price) * 100),
         currency: formData.currency.toLowerCase(),
         image_url: finalImageUrl,
-        checkoutSchema: formData.checkoutSchema
+        checkoutSchema: formData.checkoutSchema,
+        digitalFileUrl: formData.digitalFileUrl || null // NEW
       };
 
       const { product } = await createProduct(productData); // Use createProduct from api.js
@@ -115,7 +117,8 @@ function ProductForm() {
         productId: product.productId,
         sellerId: product.sellerId,
         email: formData.sellerEmail,
-        expiresAt: formData.expirationDate || null // Include expiration date if provided
+        expiresAt: formData.expirationDate || null, // Include expiration date if provided
+        digitalFileUrl: formData.digitalFileUrl || null // NEW
       };
 
       console.log('Creating payment link with data:', paymentLinkData); // Debug log
@@ -236,6 +239,18 @@ function ProductForm() {
                 onChange={handleInputChange}
                 style={styles.input}
                 placeholder="https://example.com/image.jpg"
+              />
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Digital Download URL (optional)</label>
+              <input
+                type="url"
+                name="digitalFileUrl"
+                placeholder="https://example.com/your-file.zip"
+                value={formData.digitalFileUrl}
+                onChange={(e) => setFormData({ ...formData, digitalFileUrl: e.target.value })}
+                style={styles.input}
               />
             </div>
 
