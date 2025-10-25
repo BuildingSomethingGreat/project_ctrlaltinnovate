@@ -13,10 +13,10 @@ function PaymentSuccess() {
       <p style={styles.description}>Thank you for your purchase.</p>
       {isDigital && (
         <p style={styles.description}>
-          Your downloadable file is being processed and will be delivered shortly.
+          Your downloadable file is being processed and will be delivered within 24 hours.
         </p>
       )}
-      <p style={styles.small}>Session ID: {sessionId}</p>
+      {/* <p style={styles.small}>Session ID: {sessionId}</p> */}
       {/* <Link to="/">
         <button style={styles.button}>
           Create Another Payment Link
