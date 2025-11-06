@@ -19,7 +19,49 @@ const privateKey = JSON.parse(process.env.FIREBASE_PRIVATE_KEY).private_key.repl
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const { generateEmailTemplate } = require('./utils/emailTemplate');
+// const { generateEmailTemplate } = require('./utils/emailTemplate');
+
+// Update email template branding: header logo, green accents, default app name "InstaPay"
+function generateEmailTemplate({ appName = 'InstaPay', title, message, details }) {
+  const publicBase = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+  const brandLogo = `${publicBase}/white-logo-full.png`;
+  const accent = '#16a34a'; // medium green
+
+  return `
+  <div style="background:#f6f9fc;padding:24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+      <tr>
+        <td style="padding:24px 24px 8px 24px;text-align:center;">
+          <img src="${brandLogo}" alt="${appName}" style="width:180px;max-width:80%;height:auto;display:block;margin:0 auto 8px;" />
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 24px 8px 24px;">
+          <h1 style="margin:0;font-family:Inter,Arial,sans-serif;font-size:20px;line-height:28px;color:#0f172a;">${title || ''}</h1>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 24px 16px 24px;">
+          <div style="font-family:Inter,Arial,sans-serif;font-size:14px;line-height:22px;color:#334155;">${message || ''}</div>
+        </td>
+      </tr>
+      ${details ? `
+      <tr>
+        <td style="padding:0 24px 24px 24px;">
+          <div style="font-family:Inter,Arial,sans-serif;font-size:14px;line-height:22px;color:#334155;">${details}</div>
+        </td>
+      </tr>` : ''}
+      <tr>
+        <td style="padding:16px 24px 24px 24px;">
+          <div style="height:1px;background:${accent};opacity:0.3;"></div>
+          <div style="text-align:center;margin-top:12px;font-family:Inter,Arial,sans-serif;font-size:12px;color:#64748b;">
+            Sent with <span style="color:${accent};font-weight:600;">${appName}</span>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>`;
+}
 
 // Initialize Firebase Admin SDK
 if (!admin.apps.length) {
@@ -177,7 +219,7 @@ async function autoFulfillDigitalOrder(session) {
     }
 
     const buyerHtml = generateEmailTemplate({
-      appName: 'CtrlAltInnovate',
+      appName: 'InstaPay',
       title: 'Your download is ready',
       message: `Thanks for your purchase of <strong>${product.title}</strong>. Your file is attached.`,
       details: `
@@ -187,20 +229,16 @@ async function autoFulfillDigitalOrder(session) {
       `
     });
 
-    // Send buyer email (with attachment when available)
     await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || 'no-reply@ctrlaltinnovate.com',
+      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
       to: buyerEmail,
       subject: `Your ${product.title} download`,
       html: buyerHtml,
       ...(attachment ? { attachments: [attachment] } : {})
     });
 
-    console.log(attachment)
-
-    // Notify seller
     const sellerHtml = generateEmailTemplate({
-      appName: 'CtrlAltInnovate',
+      appName: 'InstaPay',
       title: 'Your order was automatically fulfilled',
       message: `An order for <strong>${product.title}</strong> was automatically fulfilled via digital delivery.`,
       details: `
@@ -211,7 +249,7 @@ async function autoFulfillDigitalOrder(session) {
     });
 
     await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || 'no-reply@ctrlaltinnovate.com',
+      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
       to: seller.email,
       subject: 'Your order was automatically fulfilled',
       html: sellerHtml
@@ -673,13 +711,13 @@ async function finalizeAuction(link) {
 
       // Email winner with payment link
       const emailHtml = generateEmailTemplate({
-        appName: 'CtrlAltInnovate',
+        appName: 'InstaPay',
         title: 'You won the auction!',
         message: `Congrats! You won the auction for <strong>${product.title}</strong> with a bid of $${(winner.amount_cents / 100).toFixed(2)}.`,
-        details: `<a href="${winnerPageUrl}" style="color:#2563eb;font-weight:600;">Complete your purchase</a><div style="margin-top:8px;">Link expires: ${new Date(expiresAt).toLocaleString()}</div>`
+        details: `<a href="${winnerPageUrl}" style="color:#16a34a;font-weight:600;">Complete your purchase</a><div style="margin-top:8px;">Link expires: ${new Date(expiresAt).toLocaleString()}</div>`
       });
       await resend.emails.send({
-        from: process.env.RESEND_FROM_EMAIL || 'no-reply@ctrlaltinnovate.com',
+        from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
         to: winner.email,
         subject: 'You won the auction!',
         html: emailHtml
@@ -805,7 +843,9 @@ app.get('/p/:linkId', async (req, res) => {
       buttonColor: '#2563eb',
       textColor: '#0f172a'
     };
-    product.price_display = (product.price_cents / 100).toFixed(2);
+    product.price_display = (product.price_cents ? product.price_cents : 0) > 0
+      ? (product.price_cents / 100).toFixed(2)
+      : (link.auction?.startingPrice_cents ? (link.auction.startingPrice_cents / 100).toFixed(2) : '0.00');
 
     let hasDigital = Boolean(
       (link.digitalDownload && (link.digitalDownload.storagePath || link.digitalDownload.contentUrl)) ||
@@ -815,8 +855,22 @@ app.get('/p/:linkId', async (req, res) => {
       hasDigital = true;
     }
 
+    // Brand assets (served by frontend public folder)
+    const publicBase = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+    const brand = {
+      name: 'InstaPay',
+      textUrl: `${publicBase}/instapay-logo-text.png`,
+      emailLogoUrl: `${publicBase}/white-logo-full.png`,
+      accentColor: '#16a34a' // medium green
+    };
+
+    const legal = {
+      // UPDATED: point privacy link to frontend static page
+      privacyUrl: `${publicBase}/privacy`
+    };
+
     const template = fs.readFileSync(path.join(__dirname, 'templates', 'payment_page.mustache'), 'utf8');
-    const html = mustache.render(template, { product, link, hasDigital });
+    const html = mustache.render(template, { product, link, hasDigital, brand, legal });
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
   } catch (err) {

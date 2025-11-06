@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Privacy Policy · InstaPay</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { --accent: #16a34a; }
+      body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif; background:#f6f9fc; color:#0f172a; }
+      .wrap { max-width: 860px; margin: 32px auto; padding: 0 16px; }
+      .card { background:#fff; border:1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); padding: 24px; }
+      h1 { font-size: 24px; margin: 8px 0 16px; }
+      h2 { font-size: 18px; margin: 20px 0 10px; }
+      p, li { line-height: 1.6; color:#334155; }
+      .brand { display:flex; justify-content:center; margin-bottom: 12px; }
+      .muted { color:#64748b; font-size: 13px; }
+      a { color: var(--accent); }
+      ul { padding-left: 18px; }
+      footer { margin-top: 28px; text-align: center; color:#64748b; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="brand">
+          <img src="/instapay-text.png" alt="InstaPay" style="max-width:200px;width:200px;height:auto;" />
+        </div>
+        <h1>Privacy Policy</h1>
+        <p class="muted">Last updated: <span id="lastUpdated"></span></p>
+
+        <h2>Introduction</h2>
+        <p>InstaPay (“we”, “us”, or “our”) provides payment links, auction-style listings, and digital delivery services. This Privacy Policy describes how we collect, use, and share information when you use our services.</p>
+
+        <h2>Information We Collect</h2>
+        <ul>
+          <li>Information you provide, such as name, email address, product details, or bid amounts.</li>
+          <li>Transaction-related data from our payment processor (e.g., Stripe), such as payment status and identifiers.</li>
+          <li>Log and device data such as IP address, browser, pages viewed, and timestamps.</li>
+          <li>Files you upload for digital delivery (stored securely for fulfillment).</li>
+        </ul>
+
+        <h2>How We Use Information</h2>
+        <ul>
+          <li>To create and manage payment links and auction listings.</li>
+          <li>To process payments and deliver digital downloads after purchase.</li>
+          <li>To send transactional communications (e.g., purchase confirmations, auction winner notifications).</li>
+          <li>To protect against fraud, abuse, or violations of our policies.</li>
+          <li>To improve and maintain our services.</li>
+        </ul>
+
+        <h2>Sharing of Information</h2>
+        <ul>
+          <li>Payment Processing: We share relevant data with Stripe to process transactions.</li>
+          <li>Email Delivery: We use email providers to send transactional messages.</li>
+          <li>Storage: Digital files may be stored with cloud storage providers for secure delivery.</li>
+          <li>Service Providers: We work with vendors who assist in operating our services under appropriate safeguards.</li>
+          <li>Legal: We may disclose information to comply with law, protect rights, or respond to lawful requests.</li>
+          <li>Business Transfers: In the event of a merger, acquisition, or asset sale, information may be transferred.</li>
+        </ul>
+
+        <h2>Data Retention</h2>
+        <p>We retain information as long as necessary to provide our services, comply with legal obligations, resolve disputes, and enforce agreements.</p>
+
+        <h2>Your Choices</h2>
+        <ul>
+          <li>You may request access, correction, or deletion of your personal information where applicable.</li>
+          <li>You can opt out of non-essential communications. Transactional messages may still be sent when necessary.</li>
+        </ul>
+
+        <h2>Security</h2>
+        <p>We implement technical and organizational measures designed to protect your information. No system is 100% secure, and we cannot guarantee absolute security.</p>
+
+        <h2>International Transfers</h2>
+        <p>Your information may be processed and stored in countries other than your own. We take steps to ensure appropriate protections are in place.</p>
+
+        <h2>Children’s Privacy</h2>
+        <p>Our services are not directed to children, and we do not knowingly collect personal information from children.</p>
+
+        <h2>Changes to this Policy</h2>
+        <p>We may update this Privacy Policy from time to time. We will post the updated version on this page and revise the “Last updated” date.</p>
+
+        <h2>Contact Us</h2>
+        <p>Questions? Contact us at <a href="mailto:support@instapay.app">support@instapay.app</a>.</p>
+
+        <footer>Sent with <span style="color:var(--accent);font-weight:600;">InstaPay</span></footer>
+      </div>
+    </div>
+    <script>
+      document.getElementById('lastUpdated').textContent =
+        new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    </script>
+  </body>
+</html>

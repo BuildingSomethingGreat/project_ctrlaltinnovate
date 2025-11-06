@@ -30,6 +30,15 @@
       border-radius: 8px;
       background: #efefef;
     }
+    .productimg {
+      width: auto;
+      max-height: 500px;
+      height: auto;
+      margin: auto;
+    
+      border-radius: 8px;
+      background: #efefef;
+    }
     .title { font-size: 18px; margin-top: 12px; font-weight: 600; }
     .desc { color: #6b7280; margin-top: 8px; font-size: 14px; }
     .price { font-size: 20px; font-weight: 700; margin-top: 12px; }
@@ -56,10 +65,18 @@
     }
   </style>
 </head>
-<body>
+<body style="flex-direction:column;">
   <div class="card">
+    <!-- InstaPay brand above product content (always visible) -->
+    <div style="display:flex;justify-content:center;margin-bottom:20px; margin-top:20px;">
+      <img src="{{brand.textUrl}}" alt="InstaPay" style="width:130px;height:25px;" />
+      {{! <p style="width:50%;">Sell in seconds. Get paid instantly.</p> }}
+    </div>
+
     {{#product.image_url}}
-      <img src="{{product.image_url}}" class="img" alt="product image" />
+    <div style="display:flex;justify-content:center;">
+      <img src="{{product.image_url}}" class="productimg" alt="product image" />
+    </div>
     {{/product.image_url}}
 
     <div class="title">{{product.title}}</div>
@@ -93,10 +110,11 @@
     {{/link.auction.enabled}}
 
     <button id="buyBtn" class="btn">Buy now</button>
-    <div class="small">Secure checkout powered by Stripe.</div>
-
-    
+    <div class="small" style="margin-top: 20px; ">Secure checkout powered by <span style="color:purple;">Stripe</span> and <span style="color:red;">Edwards Technology</span>  .</div>
   </div>
+
+  <p  class="small" style="margin-top: 20px;"><span style="color:rgba(0,0,0,.5); ">InstaPay copyright © 2025. Created by Edwards Technology and Affiliates</span> ♥️.</p>
+  <a  class="small" href="/privacy.html" target="_blank" rel="noopener" style="color:rgba(0,0,0,.5);text-decoration:underline;">Privacy Policy</a>
 
   <script>
     const buyBtn = document.getElementById('buyBtn');
