@@ -364,7 +364,7 @@ app.get('/api/auth/magic/verify', async (req, res) => {
       { merge: true }
     );
 
-    const redirectTo = `${baseUrl()}/?verified=1&email=${encodeURIComponent(t.email)}`;
+    const redirectTo = `${baseUrl()}/verified.html?verified=1&email=${encodeURIComponent(t.email)}`;
     return res.redirect(302, redirectTo);
   } catch (err) {
     console.error('magic verify err', err);

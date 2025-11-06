@@ -1,1472 +1,1790 @@
 {
-    "openapi": "3.1.1",
-    "info": {
-      "title": "Quick-Pay Concierge API",
-      "version": "1.2.1",
-      "description": "API for seller onboarding, product/link creation, Stripe Checkout, metrics, image upload, digital downloads, server-rendered payment pages, and test seeders."
-    },
-    "servers": [
-      {
-        "url": "https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com"
+  "openapi": "3.1.1",
+  "info": {
+    "title": "Quick-Pay Concierge API",
+    "version": "1.2.1",
+    "description": "API for seller onboarding, product/link creation, Stripe Checkout, metrics, image upload, digital downloads, server-rendered payment pages, and test seeders."
+  },
+  "servers": [
+    {
+      "url": "https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
       }
-    ],
-    "components": {
-      "schemas": {
-        "CheckoutSchema": {
-          "type": "object",
-          "properties": {
-            "theme": {
-              "type": "string",
-              "description": "Theme name",
-              "example": "default"
-            },
-            "backgroundColor": {
-              "type": "string",
-              "description": "Hex color",
-              "example": "#f7fafc"
-            },
-            "accentColor": {
-              "type": "string",
-              "description": "Hex color",
-              "example": "#2563eb"
-            },
-            "buttonColor": {
-              "type": "string",
-              "description": "Hex color",
-              "example": "#2563eb"
-            },
-            "textColor": {
-              "type": "string",
-              "description": "Hex color",
-              "example": "#0f172a"
-            }
+    },
+    "schemas": {
+      "CheckoutSchema": {
+        "type": "object",
+        "properties": {
+          "theme": {
+            "type": "string",
+            "description": "Theme name",
+            "example": "default"
           },
-          "additionalProperties": true
-        },
-        "DigitalDownload": {
-          "type": "object",
-          "properties": {
-            "fileName": {
-              "type": "string"
-            },
-            "contentType": {
-              "type": "string"
-            },
-            "storagePath": {
-              "type": "string",
-              "description": "GCS path where file is stored"
-            },
-            "fileSize": {
-              "type": "integer",
-              "nullable": true,
-              "description": "Size in bytes (if known)"
-            },
-            "updatedAt": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "contentUrl": {
-              "type": "string",
-              "format": "uri",
-              "nullable": true,
-              "description": "Public URL source when file is not stored in GCS"
-            }
+          "backgroundColor": {
+            "type": "string",
+            "description": "Hex color",
+            "example": "#f7fafc"
+          },
+          "accentColor": {
+            "type": "string",
+            "description": "Hex color",
+            "example": "#2563eb"
+          },
+          "buttonColor": {
+            "type": "string",
+            "description": "Hex color",
+            "example": "#2563eb"
+          },
+          "textColor": {
+            "type": "string",
+            "description": "Hex color",
+            "example": "#0f172a"
           }
         },
-        "Seller": {
-          "type": "object",
-          "properties": {
-            "sellerId": {
-              "type": "string"
-            },
-            "email": {
-              "type": "string",
-              "format": "email"
-            },
-            "stripeAccountId": {
-              "type": "string"
-            },
-            "stripeAccountStatus": {
-              "type": "object"
-            },
-            "businessProfile": {
-              "type": "object",
-              "nullable": true
-            },
-            "country": {
-              "type": "string",
-              "nullable": true
-            },
-            "active": {
-              "type": "boolean",
-              "nullable": true
-            },
-            "createdAt": {
-              "type": "string",
-              "format": "date-time"
-            }
+        "additionalProperties": true
+      },
+      "DigitalDownload": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "storagePath": {
+            "type": "string",
+            "description": "GCS path where file is stored"
+          },
+          "fileSize": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Size in bytes (if known)"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "contentUrl": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true,
+            "description": "Public URL source when file is not stored in GCS"
+          }
+        }
+      },
+      "Seller": {
+        "type": "object",
+        "properties": {
+          "sellerId": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "stripeAccountId": {
+            "type": "string"
+          },
+          "stripeAccountStatus": {
+            "type": "object"
+          },
+          "businessProfile": {
+            "type": "object",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "emailVerifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         },
-        "Product": {
-          "type": "object",
-          "properties": {
-            "productId": {
-              "type": "string"
-            },
-            "sellerId": {
-              "type": "string"
-            },
-            "title": {
-              "type": "string"
-            },
-            "description": {
-              "type": "string"
-            },
-            "price_cents": {
-              "type": "integer",
-              "nullable": true,
-              "description": "Optional when auction is enabled; when present, amount in cents."
-            },
-            "currency": {
-              "type": "string"
-            },
-            "image_url": {
-              "type": "string",
-              "format": "uri",
-              "nullable": true
-            },
-            "inventory": {
-              "type": "integer",
-              "nullable": true
-            },
-            "active": {
-              "type": "boolean"
-            },
-            "isSold": {
-              "type": "boolean",
-              "nullable": true,
-              "description": "Set to true on successful checkout via webhook"
-            },
-            "checkoutSchema": {
-              "$ref": "#/components/schemas/CheckoutSchema"
-            },
-            "digitalDownload": {
-              "$ref": "#/components/schemas/DigitalDownload"
-            },
-            "hasDigital": {
-              "type": "boolean",
-              "description": "Convenience flag set when a digital download exists"
-            },
-            "createdAt": {
-              "type": "string",
-              "format": "date-time"
-            }
+        "required": ["sellerId", "email", "emailVerified"]
+      },
+      "MagicLinkRequest": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
           }
-        },
-        "Link": {
-          "type": "object",
-          "properties": {
-            "linkId": {
-              "type": "string"
-            },
-            "productId": {
-              "type": "string"
-            },
-            "sellerId": {
-              "type": "string"
-            },
-            "createdAt": {
-              "type": "string",
-              "format": "date-time"
-            },
-            "expiresAt": {
-              "type": "string",
-              "format": "date-time",
-              "nullable": true
-            },
-            "active": {
-              "type": "boolean",
-              "nullable": true
-            },
-            "hasDigital": {
-              "type": "boolean",
-              "description": "Indicates if a digital download will be delivered after purchase"
-            },
-            "digitalDownload": {
-              "allOf": [
-                {
-                  "$ref": "#/components/schemas/DigitalDownload"
-                }
-              ],
-              "description": "Snapshot from product (if any), for convenience",
-              "nullable": true
-            }
+        }
+      },
+      "MagicLinkResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "sellerId": {
+            "type": "string"
+          },
+          "emailed": {
+            "type": "boolean"
           }
-        },
-        "Order": {
-          "type": "object",
-          "properties": {
-            "orderId": {
-              "type": "string"
-            },
-            "checkoutSessionId": {
-              "type": "string"
-            },
-            "linkId": {
-              "type": "string",
-              "nullable": true
-            },
-            "productId": {
-              "type": "string",
-              "nullable": true
-            },
-            "sellerId": {
-              "type": "string",
-              "nullable": true
-            },
-            "amount_total": {
-              "type": "integer",
-              "nullable": true
-            },
-            "currency": {
-              "type": "string",
-              "nullable": true
-            },
-            "buyer_email": {
-              "type": "string",
-              "format": "email",
-              "nullable": true
-            },
-            "shipping": {
-              "type": "object",
-              "nullable": true
-            },
-            "status": {
-              "type": "string"
-            },
-            "createdAt": {
-              "type": "string",
-              "format": "date-time"
-            }
+        }
+      },
+      "ResolveSellerResponse": {
+        "type": "object",
+        "properties": {
+          "seller": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Seller"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        },
-        "SellerMetrics": {
-          "type": "object",
-          "properties": {
-            "stripe": {
-              "type": "object",
-              "properties": {
-                "balance": {
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "requiresEmailVerification": {
+            "type": "boolean",
+            "nullable": true
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "sellerId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "price_cents": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Optional when auction is enabled; amount in cents."
+          },
+          "currency": {
+            "type": "string"
+          },
+          "image_url": {
+            "type": "string",
+            "format": "uri",
+            "nullable": true
+          },
+          "inventory": {
+            "type": "integer",
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "isSold": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Set to true on successful checkout via webhook"
+          },
+          "checkoutSchema": {
+            "$ref": "#/components/schemas/CheckoutSchema"
+          },
+          "digitalDownload": {
+            "$ref": "#/components/schemas/DigitalDownload"
+          },
+          "hasDigital": {
+            "type": "boolean",
+            "description": "Convenience flag set when a digital download exists"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Link": {
+        "type": "object",
+        "properties": {
+          "linkId": {
+            "type": "string"
+          },
+          "productId": {
+            "type": "string"
+          },
+          "sellerId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "active": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "hasDigital": {
+            "type": "boolean",
+            "description": "Indicates if a digital download will be delivered after purchase"
+          },
+          "digitalDownload": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DigitalDownload"
+              }
+            ],
+            "description": "Snapshot from product (if any), for convenience",
+            "nullable": true
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "checkoutSessionId": {
+            "type": "string"
+          },
+          "linkId": {
+            "type": "string",
+            "nullable": true
+          },
+          "productId": {
+            "type": "string",
+            "nullable": true
+          },
+          "sellerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "amount_total": {
+            "type": "integer",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string",
+            "nullable": true
+          },
+          "buyer_email": {
+            "type": "string",
+            "format": "email",
+            "nullable": true
+          },
+          "shipping": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SellerMetrics": {
+        "type": "object",
+        "properties": {
+          "stripe": {
+            "type": "object",
+            "properties": {
+              "balance": {
+                "type": "object"
+              },
+              "recentPaymentIntents": {
+                "type": "array",
+                "items": {
                   "type": "object"
-                },
-                "recentPaymentIntents": {
-                  "type": "array",
-                  "items": {
-                    "type": "object"
-                  }
                 }
               }
-            },
-            "orders": {
-              "type": "array",
-              "items": {
-                "$ref": "#/components/schemas/Order"
-              }
-            },
-            "salesByProduct": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "object",
-                "properties": {
-                  "count": {
-                    "type": "integer"
-                  },
-                  "revenue_cents": {
-                    "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "UploadResponse": {
-          "type": "object",
-          "properties": {
-            "imageUrl": {
-              "type": "string",
-              "format": "uri"
-            }
-          }
-        },
-        "CreateCheckoutSessionResponse": {
-          "type": "object",
-          "properties": {
-            "url": {
-              "type": "string",
-              "format": "uri"
-            }
-          }
-        },
-        "Error": {
-          "type": "object",
-          "properties": {
-            "error": {
-              "type": "string"
-            }
-          }
-        },
-        "CheckoutSessionMetadata": {
-          "type": "object",
-          "description": "Metadata applied to the Stripe Checkout Session (not returned by this API; documented for reference).",
-          "properties": {
-            "linkId": { "type": "string" },
-            "productId": { "type": "string" },
-            "sellerId": { "type": "string" },
-            "hasDigital": {
-              "type": "string",
-              "enum": ["0", "1"],
-              "description": "Set to '1' when a digital download exists; otherwise '0'. May be omitted in some builds."
             }
           },
-          "required": ["linkId", "productId", "sellerId"]
-        },
-        "Auction": {
-          "type": "object",
-          "description": "Auction configuration and state attached to a link.",
-          "properties": {
-            "enabled": { "type": "boolean" },
-            "endsAt": { "type": "string", "format": "date-time" },
-            "startingPrice_cents": { "type": "integer", "description": "Starting bid (in cents)" },
-            "minIncrement_cents": { "type": "integer", "description": "Minimum increment (in cents)" },
-            "status": { "type": "string", "enum": ["active", "finalized"] },
-            "winner": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            }
+          },
+          "salesByProduct": {
+            "type": "object",
+            "additionalProperties": {
               "type": "object",
-              "nullable": true,
               "properties": {
-                "email": { "type": "string", "format": "email" },
-                "bidId": { "type": "string" },
-                "amount_cents": { "type": "integer" }
+                "count": {
+                  "type": "integer"
+                },
+                "revenue_cents": {
+                  "type": "integer"
+                }
               }
             }
+          }
+        }
+      },
+      "UploadResponse": {
+        "type": "object",
+        "properties": {
+          "imageUrl": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "CreateCheckoutSessionResponse": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      },
+      "CheckoutSessionMetadata": {
+        "type": "object",
+        "description": "Metadata applied to the Stripe Checkout Session (not returned by this API; documented for reference).",
+        "properties": {
+          "linkId": {
+            "type": "string"
           },
-          "required": ["enabled", "endsAt"]
-        },
-        "Bid": {
-          "type": "object",
-          "properties": {
-            "bidId": { "type": "string" },
-            "email": { "type": "string", "format": "email" },
-            "amount_cents": { "type": "integer" },
-            "createdAt": { "type": "string", "format": "date-time" }
+          "productId": {
+            "type": "string"
           },
-          "required": ["bidId", "email", "amount_cents", "createdAt"]
+          "sellerId": {
+            "type": "string"
+          },
+          "hasDigital": {
+            "type": "string",
+            "enum": ["0", "1"],
+            "description": "Set to '1' when a digital download exists; otherwise '0'. May be omitted in some builds."
+          }
         },
-        "LinkDoc": {
-          "type": "object",
-          "properties": {
-            "auction": { "$ref": "#/components/schemas/Auction" }
+        "required": ["linkId", "productId", "sellerId"]
+      },
+      "Auction": {
+        "type": "object",
+        "description": "Auction configuration and state attached to a link.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "startingPrice_cents": {
+            "type": "integer",
+            "description": "Starting bid (in cents)",
+            "nullable": true
+          },
+          "minIncrement_cents": {
+            "type": "integer",
+            "description": "Minimum increment (in cents)",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "finalized"],
+            "nullable": true
+          },
+          "winner": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email"
+              },
+              "bidId": {
+                "type": "string"
+              },
+              "amount_cents": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "required": ["enabled", "endsAt"]
+      },
+      "Bid": {
+        "type": "object",
+        "properties": {
+          "bidId": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "amount_cents": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["bidId", "email", "amount_cents", "createdAt"]
+      },
+      "LinkDoc": {
+        "type": "object",
+        "properties": {
+          "auction": {
+            "$ref": "#/components/schemas/Auction"
           }
         }
       }
-    },
-    "paths": {
-      "/api/upload": {
-        "post": {
-          "operationId": "uploadImage",
-          "summary": "Upload an image to Firebase Storage and get a public URL",
-          "requestBody": {
-            "required": true,
-            "content": {
-              "image/*": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Upload successful",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/UploadResponse"
-                  }
-                }
-              }
-            },
-            "400": {
-              "description": "No file or invalid content type",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "500": {
-              "description": "Upload failed",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/sellers/onboard": {
-        "post": {
-          "operationId": "onboardSeller",
-          "summary": "Create Stripe Express connected account and onboarding link (Firebase protected)",
-          "security": [
-            {
-              "BearerAuth": []
-            }
-          ],
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "email"
-                  ],
-                  "properties": {
-                    "sellerId": {
-                      "type": "string",
-                      "description": "Optional; server will generate if absent"
-                    },
-                    "email": {
-                      "type": "string",
-                      "format": "email"
-                    },
-                    "business_type": {
-                      "type": "string",
-                      "enum": [
-                        "individual",
-                        "company"
-                      ],
-                      "nullable": true
-                    },
-                    "country": {
-                      "type": "string",
-                      "default": "US"
-                    },
-                    "business_profile": {
-                      "type": "object",
-                      "nullable": true
-                    }
-                  }
-                },
-                "example": {
-                  "email": "seller@example.com",
-                  "business_type": "individual",
-                  "country": "US"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Onboarding link created (welcome email is also sent)",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "sellerId": {
-                        "type": "string"
-                      },
-                      "stripeAccountId": {
-                        "type": "string"
-                      },
-                      "accountLink": {
-                        "type": "string",
-                        "format": "uri"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "4XX": {
-              "description": "Client error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/products": {
-        "post": {
-          "operationId": "createProduct",
-          "summary": "Create product",
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "sellerId",
-                    "title"
-                  ],
-                  "properties": {
-                    "sellerId": {
-                      "type": "string"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "type": "string"
-                    },
-                    "price_cents": {
-                      "type": "integer",
-                      "nullable": true,
-                      "description": "Optional when auction is enabled; amount in cents."
-                    },
-                    "currency": {
-                      "type": "string",
-                      "default": "usd"
-                    },
-                    "image_url": {
-                      "type": "string",
-                      "format": "uri",
-                      "nullable": true
-                    },
-                    "inventory": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "checkoutSchema": {
-                      "$ref": "#/components/schemas/CheckoutSchema"
-                    },
-                    "digitalFileUrl": {
-                      "type": "string",
-                      "format": "uri",
-                      "nullable": true,
-                      "description": "Optional public URL; server stages to Storage and normalizes to digitalDownload."
-                    }
-                  }
-                },
-                "example": {
-                  "sellerId": "SELLER_123",
-                  "title": "Fall Retreat Hoodie",
-                  "description": "Midweight fleece, sizes S–XXL",
-                  "price_cents": 3799,
-                  "currency": "usd",
-                  "image_url": "https://cdn.yourapp.com/img/hoodie.png",
-                  "inventory": 25,
-                  "checkoutSchema": {
-                    "theme": "default",
-                    "backgroundColor": "#f7fafc",
-                    "accentColor": "#2563eb",
-                    "buttonColor": "#2563eb",
-                    "textColor": "#0f172a"
-                  },
-                  "digitalFileUrl": "https://cdn.example.com/files/guide.pdf"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Created product",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "product": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "4XX": {
-              "description": "Client error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/products/{productId}/associate": {
-        "post": {
-          "operationId": "associateProductToSeller",
-          "summary": "Associate product to seller (Firebase protected)",
-          "security": [
-            {
-              "BearerAuth": []
-            }
-          ],
-          "parameters": [
-            {
-              "name": "productId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string"
-              }
-            }
-          ],
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "sellerId"
-                  ],
-                  "properties": {
-                    "sellerId": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "sellerId": "SELLER_123"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Association updated",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "success": {
-                        "type": "boolean"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "404": {
-              "description": "Product not found",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/products/{productId}/digital": {
-        "post": {
-          "operationId": "uploadDigitalForProduct",
-          "summary": "Upload a digital file for a product (stored privately; used for auto-fulfillment)",
-          "description": "Server expects raw binary via application/octet-stream. Optional header 'x-filename' may be sent by clients and will be sanitized server-side. For tool compatibility, multipart and base64 JSON fallbacks are also defined.",
-          "parameters": [
-            {
-              "name": "productId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string"
-              }
-            }
-          ],
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/octet-stream": {
-                "schema": {
-                  "type": "string",
-                  "format": "binary"
-                }
-              },
-              "multipart/form-data": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "file"
-                  ],
-                  "properties": {
-                    "file": {
-                      "type": "string",
-                      "format": "binary"
-                    },
-                    "filename": {
-                      "type": "string",
-                      "description": "Optional: original file name"
-                    },
-                    "contentType": {
-                      "type": "string",
-                      "description": "Optional MIME type"
-                    }
-                  }
-                }
-              },
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "description": "Explorer-friendly fallback; server still stores the decoded bytes.",
-                  "required": [
-                    "fileBase64"
-                  ],
-                  "properties": {
-                    "fileBase64": {
-                      "type": "string",
-                      "format": "byte",
-                      "description": "Base64 file content"
-                    },
-                    "filename": {
-                      "type": "string"
-                    },
-                    "contentType": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Digital file saved and product updated",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "digitalDownload": {
-                        "$ref": "#/components/schemas/DigitalDownload"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "400": {
-              "description": "Missing productId or file",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "404": {
-              "description": "Product not found",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "500": {
-              "description": "Failed to upload digital file",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/links": {
-        "post": {
-          "operationId": "createLink",
-          "summary": "Create a short link for a product (returns landing page URL and digital flag)",
-          "requestBody": {
-            "required": true,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "productId"
-                  ],
-                  "properties": {
-                    "productId": {
-                      "type": "string"
-                    },
-                    "sellerId": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "email": {
-                      "type": "string",
-                      "format": "email",
-                      "nullable": true
-                    },
-                    "expiresAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true,
-                      "description": "Optional expiration for the payment link. When set (and no auction), the payment page displays the expiry and the server blocks checkout after this time."
-                    },
-                    "digitalFileUrl": {
-                      "type": "string",
-                      "format": "uri",
-                      "nullable": true,
-                      "description": "Optional public URL; server stages to Storage and snapshots into link.digitalDownload"
-                    },
-                    "auction": {
-                      "type": "object",
-                      "nullable": true,
-                      "description": "Enable bidding for this link. When enabled, link.expiresAt will be set to auction.endsAt.",
-                      "properties": {
-                        "enabled": { "type": "boolean" },
-                        "endsAt": { "type": "string", "format": "date-time" },
-                        "startingPrice_cents": { "type": "integer", "nullable": true },
-                        "minIncrement_cents": { "type": "integer", "nullable": true }
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "productId": "prod_abc123",
-                  "sellerId": "SELLER_123",
-                  "expiresAt": "2025-12-31T23:59:59.000Z"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Link created",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "linkId": {
-                        "type": "string"
-                      },
-                      "pageUrl": {
-                        "type": "string",
-                        "format": "uri"
-                      },
-                      "hasDigital": {
-                        "type": "boolean"
-                      },
-                      "auction": { "$ref": "#/components/schemas/Auction" }
-                    }
-                  },
-                  "examples": {
-                    "example": {
-                      "value": {
-                        "linkId": "K3P9JQW",
-                        "pageUrl": "https://pay.yourapp.com/p/K3P9JQW?digital=1",
-                        "hasDigital": true
-                      }
-                    },
-                    "auctionEnabled": {
-                      "value": {
-                        "linkId": "K3P9JQW",
-                        "pageUrl": "https://pay.example.com/p/K3P9JQW",
-                        "hasDigital": false,
-                        "auction": {
-                          "enabled": true,
-                          "endsAt": "2025-12-31T23:59:59.000Z",
-                          "startingPrice_cents": 5000,
-                          "minIncrement_cents": 100,
-                          "status": "active"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "4XX": {
-              "description": "Client error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/p/{linkId}": {
-        "get": {
-          "operationId": "renderPaymentPage",
-          "summary": "Server-rendered payment page (HTML)",
-          "parameters": [
-            {
-              "name": "linkId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string"
-              }
-            },
-            {
-              "name": "digital",
-              "in": "query",
-              "required": false,
+    }
+  },
+  "paths": {
+    "/api/upload": {
+      "post": {
+        "operationId": "uploadImage",
+        "summary": "Upload an image to Firebase Storage and get a public URL",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/*": {
               "schema": {
                 "type": "string",
-                "enum": [
-                  "0",
-                  "1",
-                  "true",
-                  "false"
-                ]
-              },
-              "description": "Optional override to force digital flag (e.g., ?digital=1)"
+                "format": "binary"
+              }
             }
-          ],
-          "responses": {
-            "200": {
-              "description": "HTML payment page",
-              "content": {
-                "text/html": {
-                  "schema": {
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Upload successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No file or invalid content type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Upload failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sellers/onboard": {
+      "post": {
+        "operationId": "onboardSeller",
+        "summary": "Create Stripe Express connected account and onboarding link (Firebase protected)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "sellerId": {
+                    "type": "string",
+                    "description": "Optional; server will generate if absent"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "business_type": {
+                    "type": "string",
+                    "enum": [
+                      "individual",
+                      "company"
+                    ],
+                    "nullable": true
+                  },
+                  "country": {
+                    "type": "string",
+                    "default": "US"
+                  },
+                  "business_profile": {
+                    "type": "object",
+                    "nullable": true
+                  }
+                }
+              },
+              "example": {
+                "email": "seller@example.com",
+                "business_type": "individual",
+                "country": "US"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Onboarding link created (welcome email is also sent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sellerId": {
+                      "type": "string"
+                    },
+                    "stripeAccountId": {
+                      "type": "string"
+                    },
+                    "accountLink": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products": {
+      "post": {
+        "operationId": "createProduct",
+        "summary": "Create product",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["sellerId"]
+                      },
+                      {
+                        "required": ["email"]
+                      }
+                    ]
+                  }
+                ],
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "sellerId": {
+                    "type": "string",
+                    "description": "Existing verified sellerId"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "If provided, must correspond to a verified seller"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "price_cents": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Optional when auction is enabled; amount in cents."
+                  },
+                  "currency": {
+                    "type": "string",
+                    "default": "usd"
+                  },
+                  "image_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "nullable": true
+                  },
+                  "inventory": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "checkoutSchema": {
+                    "$ref": "#/components/schemas/CheckoutSchema"
+                  },
+                  "digitalFileUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "nullable": true,
+                    "description": "Optional public URL; server stages to Storage and normalizes to digitalDownload."
+                  }
+                }
+              },
+              "example": {
+                "sellerId": "SELLER_123",
+                "title": "Fall Retreat Hoodie",
+                "description": "Midweight fleece, sizes S–XXL",
+                "price_cents": 3799,
+                "currency": "usd",
+                "image_url": "https://cdn.yourapp.com/img/hoodie.png",
+                "inventory": 25,
+                "checkoutSchema": {
+                  "theme": "default",
+                  "backgroundColor": "#f7fafc",
+                  "accentColor": "#2563eb",
+                  "buttonColor": "#2563eb",
+                  "textColor": "#0f172a"
+                },
+                "digitalFileUrl": "https://cdn.example.com/files/guide.pdf"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "$ref": "#/components/schemas/Product"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EMAIL_NOT_VERIFIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing seller/title or invalid fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products/{productId}/associate": {
+      "post": {
+        "operationId": "associateProductToSeller",
+        "summary": "Associate product to seller (Firebase protected)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "sellerId"
+                ],
+                "properties": {
+                  "sellerId": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "sellerId": "SELLER_123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Association updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products/{productId}/digital": {
+      "post": {
+        "operationId": "uploadDigitalForProduct",
+        "summary": "Upload a digital file for a product (stored privately; used for auto-fulfillment)",
+        "description": "Server expects raw binary via application/octet-stream. Optional header 'x-filename' may be sent by clients and will be sanitized server-side. For tool compatibility, multipart and base64 JSON fallbacks are also defined.",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "filename": {
+                    "type": "string",
+                    "description": "Optional: original file name"
+                  },
+                  "contentType": {
+                    "type": "string",
+                    "description": "Optional MIME type"
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Explorer-friendly fallback; server still stores the decoded bytes.",
+                "required": [
+                  "fileBase64"
+                ],
+                "properties": {
+                  "fileBase64": {
+                    "type": "string",
+                    "format": "byte",
+                    "description": "Base64 file content"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "contentType": {
                     "type": "string"
                   }
                 }
               }
-            },
-            "404": {
-              "description": "Link or product not found"
-            },
-            "500": {
-              "description": "Server error"
             }
           }
-        }
-      },
-      "/api/create-checkout-session": {
-        "post": {
-          "operationId": "createCheckoutSession",
-          "summary": "Create Stripe Checkout Session for a link (auction-aware)",
-          "description": "Creates a Stripe Checkout Session for the provided linkId. If the link has an active auction (status=active), returns 400. If the auction is finalized, the highest bid amount is used as the price. Appends digital=1 to success_url when a digital download exists.",
-          "requestBody": {
-            "required": true,
+        },
+        "responses": {
+          "200": {
+            "description": "Digital file saved and product updated",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "linkId"
-                  ],
+                  "properties": {
+                    "digitalDownload": {
+                      "$ref": "#/components/schemas/DigitalDownload"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing productId or file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Product not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to upload digital file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/links": {
+      "post": {
+        "operationId": "createLink",
+        "summary": "Create a short link for a product (returns landing page URL and digital flag)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "productId"
+                ],
+                "allOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "required": ["sellerId"]
+                      },
+                      {
+                        "required": ["email"]
+                      }
+                    ]
+                  }
+                ],
+                "properties": {
+                  "productId": {
+                    "type": "string"
+                  },
+                  "sellerId": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Verified sellerId (if known)"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "nullable": true,
+                    "description": "Verified seller email (alternative to sellerId)"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "Optional expiration for the payment link. When set (and no auction), the payment page displays the expiry and the server blocks checkout after this time."
+                  },
+                  "digitalFileUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "nullable": true,
+                    "description": "Optional public URL; server stages to Storage and snapshots into link.digitalDownload"
+                  },
+                  "auction": {
+                    "type": "object",
+                    "nullable": true,
+                    "description": "Enable bidding for this link. When enabled, link.expiresAt will be set to auction.endsAt.",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "endsAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "startingPrice_cents": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "minIncrement_cents": {
+                        "type": "integer",
+                        "nullable": true
+                      }
+                    }
+                  }
+                }
+              },
+              "example": {
+                "productId": "prod_abc123",
+                "sellerId": "SELLER_123",
+                "expiresAt": "2025-12-31T23:59:59.000Z"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Link created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
                   "properties": {
                     "linkId": {
                       "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "linkId": "K3P9JQW"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Checkout session created; URL returned",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/CreateCheckoutSessionResponse"
-                  },
-                  "examples": {
-                    "withDigital": {
-                      "summary": "Digital product - success URL includes digital=1",
-                      "value": {
-                        "url": "https://checkout.stripe.com/c/pay/cs_test_123"
-                      }
                     },
-                    "withoutDigital": {
-                      "summary": "Non-digital product",
-                      "value": {
-                        "url": "https://checkout.stripe.com/c/pay/cs_test_456"
-                      }
-                    }
-                  }
-                }
-              },
-              "x-stripe-metadata": {
-                "$ref": "#/components/schemas/CheckoutSessionMetadata"
-              },
-              "x-stripe-metadata-example": {
-                "linkId": "K3P9JQW",
-                "productId": "prod_abc123",
-                "sellerId": "SELLER_123",
-                "hasDigital": "1"
-              }
-            },
-            "400": {
-              "description": "Auction is active; price invalid; or link expired",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "4XX": {
-              "description": "Client error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/sellers/{sellerId}/metrics": {
-        "get": {
-          "operationId": "getSellerMetrics",
-          "summary": "Seller metrics (Stripe balance, recent intents, orders aggregation) (Firebase protected)",
-          "security": [
-            {
-              "BearerAuth": []
-            }
-          ],
-          "parameters": [
-            {
-              "name": "sellerId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string"
-              }
-            }
-          ],
-          "responses": {
-            "200": {
-              "description": "Metrics payload",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/SellerMetrics"
-                  }
-                }
-              }
-            },
-            "4XX": {
-              "description": "Client error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/products/{productId}": {
-        "get": {
-          "operationId": "getProduct",
-          "summary": "Get product by id",
-          "parameters": [
-            {
-              "name": "productId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string"
-              }
-            }
-          ],
-          "responses": {
-            "200": {
-              "description": "Product",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "product": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "404": {
-              "description": "Not found",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/sellers/{sellerId}": {
-        "get": {
-          "operationId": "getSeller",
-          "summary": "Get seller by id",
-          "parameters": [
-            {
-              "name": "sellerId",
-              "in": "path",
-              "required": true,
-              "schema": {
-                "type": "string"
-              }
-            }
-          ],
-          "responses": {
-            "200": {
-              "description": "Seller",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "seller": {
-                        "$ref": "#/components/schemas/Seller"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "404": {
-              "description": "Not found",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/seed/product": {
-        "post": {
-          "operationId": "seedProduct",
-          "summary": "Seed a random product (testing)",
-          "requestBody": {
-            "required": false,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "sellerId": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "sellerId": "SELLER_123"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Seeded product",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "product": {
-                        "$ref": "#/components/schemas/Product"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/seed/link": {
-        "post": {
-          "operationId": "seedLink",
-          "summary": "Seed a random link (testing)",
-          "requestBody": {
-            "required": false,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "productId": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "productId": "prod_abc123"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Seeded link",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "link": {
-                        "$ref": "#/components/schemas/Link"
-                      },
-                      "pageUrl": {
-                        "type": "string",
-                        "format": "uri"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "404": {
-              "description": "No products found or product not found",
-              "content": {
-                "application/json": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      },
-      "/api/seed/seller": {
-        "post": {
-          "operationId": "seedSeller",
-          "summary": "Seed a random seller (testing)",
-          "requestBody": {
-            "required": false,
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "email": {
+                    "pageUrl": {
                       "type": "string",
-                      "format": "email"
+                      "format": "uri"
+                    },
+                    "hasDigital": {
+                      "type": "boolean"
+                    },
+                    "auction": {
+                      "$ref": "#/components/schemas/Auction"
                     }
                   }
                 },
-                "example": {
-                  "email": "seeded@example.com"
-                }
-              }
-            }
-          },
-          "responses": {
-            "200": {
-              "description": "Seeded seller + onboarding link",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "seller": {
-                        "$ref": "#/components/schemas/Seller"
-                      },
-                      "stripeAccountId": {
-                        "type": "string"
-                      },
-                      "accountLink": {
-                        "type": "string",
-                        "format": "uri"
+                "examples": {
+                  "example": {
+                    "value": {
+                      "linkId": "K3P9JQW",
+                      "pageUrl": "https://pay.yourapp.com/p/K3P9JQW?digital=1",
+                      "hasDigital": true
+                    }
+                  },
+                  "auctionEnabled": {
+                    "value": {
+                      "linkId": "K3P9JQW",
+                      "pageUrl": "https://pay.example.com/p/K3P9JQW",
+                      "hasDigital": false,
+                      "auction": {
+                        "enabled": true,
+                        "endsAt": "2025-12-31T23:59:59.000Z",
+                        "startingPrice_cents": 5000,
+                        "minIncrement_cents": 100,
+                        "status": "active"
                       }
                     }
                   }
                 }
               }
-            },
-            "5XX": {
-              "description": "Server error",
-              "content": {
-                "application/json": {
+            }
+          },
+          "403": {
+            "description": "EMAIL_NOT_VERIFIED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/Error"
                 }
               }
             }
           }
         }
-      },
-      "/api/bids": {
-        "post": {
-          "operationId": "placeBid",
-          "summary": "Place a bid on an auction-enabled link",
-          "requestBody": {
+      }
+    },
+    "/p/{linkId}": {
+      "get": {
+        "operationId": "renderPaymentPage",
+        "summary": "Server-rendered payment page (HTML)",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "digital",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1",
+                "true",
+                "false"
+              ]
+            },
+            "description": "Optional override to force digital flag (e.g., ?digital=1)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML payment page",
             "content": {
-              "application/json": {
+              "text/html": {
                 "schema": {
-                  "type": "object",
-                  "required": ["linkId", "email", "amount_cents"],
-                  "properties": {
-                    "linkId": { "type": "string" },
-                    "email": { "type": "string", "format": "email" },
-                    "amount_cents": { "type": "integer", "minimum": 1 }
-                  }
-                },
-                "example": { "linkId": "K3P9JQW", "email": "buyer@example.com", "amount_cents": 5500 }
+                  "type": "string"
+                }
               }
             }
           },
-          "responses": {
-            "200": {
-              "description": "Bid placed",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": { "ok": { "type": "boolean" }, "bid": { "$ref": "#/components/schemas/Bid" } }
-                  }
-                }
-              }
-            },
-            "400": { "description": "Invalid request or auction ended" },
-            "404": { "description": "Link not found" },
-            "5XX": { "description": "Server error" }
+          "404": {
+            "description": "Link or product not found"
+          },
+          "500": {
+            "description": "Server error"
           }
         }
-      },
-      "/api/bids/{linkId}/summary": {
-        "get": {
-          "operationId": "getAuctionSummary",
-          "summary": "Get current auction status, highest bid, and recent bids for a link",
-          "parameters": [
-            { "name": "linkId", "in": "path", "required": true, "schema": { "type": "string" } }
-          ],
-          "responses": {
-            "200": {
-              "description": "Auction summary",
-              "content": {
-                "application/json": {
-                  "schema": {
-                    "type": "object",
-                    "properties": {
-                      "auction": { "$ref": "#/components/schemas/Auction" },
-                      "highest_cents": { "type": "integer" },
-                      "highest_email_masked": { "type": "string", "nullable": true },
-                      "count": { "type": "integer" },
-                      "recent": { "type": "array", "items": { "$ref": "#/components/schemas/Bid" } }
+      }
+    },
+    "/api/create-checkout-session": {
+      "post": {
+        "operationId": "createCheckoutSession",
+        "summary": "Create Stripe Checkout Session for a link (auction-aware)",
+        "description": "Creates a Stripe Checkout Session for the provided linkId. If the link has an active auction (status=active), returns 400. If the auction is finalized, the highest bid amount is used as the price. Appends digital=1 to success_url when a digital download exists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "linkId"
+                ],
+                "properties": {
+                  "linkId": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "linkId": "K3P9JQW"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout session created; URL returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateCheckoutSessionResponse"
+                },
+                "examples": {
+                  "withDigital": {
+                    "summary": "Digital product - success URL includes digital=1",
+                    "value": {
+                      "url": "https://checkout.stripe.com/c/pay/cs_test_123"
+                    }
+                  },
+                  "withoutDigital": {
+                    "summary": "Non-digital product",
+                    "value": {
+                      "url": "https://checkout.stripe.com/c/pay/cs_test_456"
                     }
                   }
                 }
               }
             },
-            "400": { "description": "Auction not enabled for this link" },
-            "404": { "description": "Link not found" },
-            "5XX": { "description": "Server error" }
+            "x-stripe-metadata": {
+              "$ref": "#/components/schemas/CheckoutSessionMetadata"
+            },
+            "x-stripe-metadata-example": {
+              "linkId": "K3P9JQW",
+              "productId": "prod_abc123",
+              "sellerId": "SELLER_123",
+              "hasDigital": "1"
+            }
+          },
+          "400": {
+            "description": "Auction is active; price invalid; or link expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sellers/{sellerId}/metrics": {
+      "get": {
+        "operationId": "getSellerMetrics",
+        "summary": "Seller metrics (Stripe balance, recent intents, orders aggregation) (Firebase protected)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sellerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Metrics payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SellerMetrics"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Client error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products/{productId}": {
+      "get": {
+        "operationId": "getProduct",
+        "summary": "Get product by id",
+        "parameters": [
+          {
+            "name": "productId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "$ref": "#/components/schemas/Product"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/Error"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sellers/{sellerId}": {
+      "get": {
+        "operationId": "getSeller",
+        "summary": "Get seller by id",
+        "parameters": [
+          {
+            "name": "sellerId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seller": {
+                      "$ref": "#/components/schemas/Seller"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "$ref": "#/components/schemas/Error"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/seed/product": {
+      "post": {
+        "operationId": "seedProduct",
+        "summary": "Seed a random product (testing)",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sellerId": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "sellerId": "SELLER_123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seeded product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "product": {
+                      "$ref": "#/components/schemas/Product"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/seed/link": {
+      "post": {
+        "operationId": "seedLink",
+        "summary": "Seed a random link (testing)",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "productId": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "productId": "prod_abc123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seeded link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "link": {
+                      "$ref": "#/components/schemas/Link"
+                    },
+                    "pageUrl": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No products found or product not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/seed/seller": {
+      "post": {
+        "operationId": "seedSeller",
+        "summary": "Seed a random seller (testing)",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              },
+              "example": {
+                "email": "seeded@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Seeded seller + onboarding link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seller": {
+                      "$ref": "#/components/schemas/Seller"
+                    },
+                    "stripeAccountId": {
+                      "type": "string"
+                    },
+                    "accountLink": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bids": {
+      "post": {
+        "operationId": "placeBid",
+        "summary": "Place a bid on an auction-enabled link",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["linkId", "email", "amount_cents"],
+                "properties": {
+                  "linkId": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "amount_cents": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              },
+              "example": {
+                "linkId": "K3P9JQW",
+                "email": "buyer@example.com",
+                "amount_cents": 5500
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bid placed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "bid": {
+                      "$ref": "#/components/schemas/Bid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or auction ended"
+          },
+          "404": {
+            "description": "Link not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/bids/{linkId}/summary": {
+      "get": {
+        "operationId": "getAuctionSummary",
+        "summary": "Get current auction status, highest bid, and recent bids for a link",
+        "parameters": [
+          {
+            "name": "linkId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Auction summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "auction": {
+                      "$ref": "#/components/schemas/Auction"
+                    },
+                    "highest_cents": {
+                      "type": "integer"
+                    },
+                    "highest_email_masked": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "recent": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Bid"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Auction not enabled for this link"
+          },
+          "404": {
+            "description": "Link not found"
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/sellers/request-magic-link": {
+      "post": {
+        "operationId": "requestMagicLink",
+        "summary": "Send a magic-link email to verify a seller",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Magic link email sent (or seller already exists)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MagicLinkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "email required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error"
+          }
+        }
+      }
+    },
+    "/api/auth/magic/verify": {
+      "get": {
+        "operationId": "verifyMagicLink",
+        "summary": "Verify a magic-link token and mark the seller's email as verified",
+        "parameters": [
+          { "name": "token", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to frontend verified page",
+            "headers": {
+              "Location": {
+                "description": "Absolute URL of the frontend verified page",
+                "schema": {
+                  "type": "string",
+                  "format": "uri",
+                  "example": "https://frontend.example.com/verified"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid/used/expired token" },
+          "500": { "description": "Server error" }
+        }
+      }
+    },
+    "/api/sellers/resolve": {
+      "get": {
+        "operationId": "resolveSeller",
+        "summary": "Resolve a seller by email (de-dupe seller accounts)",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seller found or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveSellerResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "email required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error"
           }
         }
       }
     }
   }
+}
