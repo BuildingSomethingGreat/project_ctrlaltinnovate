@@ -71,14 +71,21 @@
       </div>
     {{/hasDigital}}
 
+    {{#link.expiresAt}}
+      <div class="note" id="expiryBox">
+        <div style="font-weight:600;margin-bottom:6px;">Offer has an expiration.</div>
+        <div>Time remaining: <span id="expiryStatus">—</span></div>
+      </div>
+    {{/link.expiresAt}}
+
     {{#link.auction.enabled}}
       <div class="note" id="auctionBox">
         <div style="font-weight:600;margin-bottom:6px;">Live Auction</div>
         <div id="auctionStatus">Ends: {{link.auction.endsAt}}</div>
         <div id="highest">Highest bid: —</div>
         <div style="margin-top:8px;">
-          <input id="bidEmail" type="email" placeholder="your@email.com" style="width:90%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;" />
-          <input id="bidAmount" type="number" min="0" step="0.01" placeholder="Your bid (USD)" style="width:90%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;" />
+          <input id="bidEmail" type="email" placeholder="your@email.com" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;" />
+          <input id="bidAmount" type="number" min="0" step="0.01" placeholder="Your bid (USD)" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;" />
           <button id="placeBid" class="btn" type="button">Place bid</button>
           <div id="bidMsg" class="small" style="margin-top:8px;"></div>
         </div>
@@ -198,6 +205,52 @@
       refreshAuction();
       setInterval(refreshAuction, 5000);
     }
+
+    // Expiration handling (friendly countdown only)
+    (function handleExpiry() {
+      const buyBtn = document.getElementById('buyBtn');
+      const expiryIso = '{{link.expiresAt}}';
+      if (!expiryIso) return;
+
+      const statusEl = document.getElementById('expiryStatus');
+      const exp = new Date(expiryIso);
+
+      function formatRemaining(ms) {
+        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const mins = Math.floor((totalSeconds % 3600) / 60);
+        const secs = totalSeconds % 60;
+
+        if (days > 0) return `${days}d ${hours}h ${mins}m`;
+        if (hours > 0) return `${hours}h ${mins}m ${secs.toString().padStart(2, '0')}s`;
+        return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+      }
+
+      function tick() {
+        if (isNaN(exp.getTime())) {
+          if (statusEl) statusEl.textContent = '';
+          return;
+        }
+        const now = new Date();
+        const diff = exp - now;
+        if (diff <= 0) {
+          if (statusEl) statusEl.textContent = 'Expired';
+          if (buyBtn) buyBtn.style.display = 'none';
+          return true; // stop
+        }
+        if (statusEl) statusEl.textContent = formatRemaining(diff);
+        return false;
+      }
+
+      // Initial and interval updates
+      const stop = tick();
+      if (!stop) {
+        const iv = setInterval(() => {
+          if (tick()) clearInterval(iv);
+        }, 1000);
+      }
+    })();
   </script>
 </body>
 </html>

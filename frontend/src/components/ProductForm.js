@@ -8,7 +8,7 @@ function ProductForm() {
     price: '',
     currency: 'USD',
     isSubscription: false,
-    expirationDate: '',
+    expirationDate: '', // e.g. 2025-12-31T23:59
     advancedSettings: false,
     customField: '',
     sellerEmail: '', // New field for seller's email
@@ -84,6 +84,16 @@ function ProductForm() {
         return;
       }
 
+      // Optional: simple future-date check for non-auction expiration
+      if (!formData.auctionEnabled && formData.expirationDate) {
+        const exp = new Date(formData.expirationDate);
+        if (isNaN(exp.getTime()) || exp <= new Date()) {
+          setValidationErrors((v) => ({ ...v, expirationDate: 'Expiration must be a future date/time' }));
+          setLoading(false);
+          return;
+        }
+      }
+
       let finalImageUrl = formData.imageUrl;
 
       // If an image file is uploaded, upload it to the server
@@ -123,7 +133,10 @@ function ProductForm() {
         productId: product.productId,
         sellerId: product.sellerId,
         email: formData.sellerEmail,
-        expiresAt: formData.expirationDate || null, // Include expiration date if provided
+        // Only send expiresAt for non-auction links
+        expiresAt: !formData.auctionEnabled && formData.expirationDate
+          ? new Date(formData.expirationDate).toISOString()
+          : null,
         digitalFileUrl: formData.digitalFileUrl || null, // NEW
         auction: formData.auctionEnabled ? {
           enabled: true,
@@ -340,6 +353,28 @@ function ProductForm() {
                   />
                 </div>
               </>
+            )}
+
+            {/* NEW: Non-auction expiration field */}
+            {!formData.auctionEnabled && (
+              <div style={{ marginBottom: 15 }}>
+                <label style={styles.label}>
+                  Offer Expires At (optional)
+                  <input
+                    type="datetime-local"
+                    name="expirationDate"
+                    value={formData.expirationDate}
+                    onChange={(e) => setFormData({ ...formData, expirationDate: e.target.value })}
+                    style={styles.input}
+                  />
+                </label>
+                {validationErrors?.expirationDate && (
+                  <div style={{ color: 'red', fontSize: 12 }}>{validationErrors.expirationDate}</div>
+                )}
+                <div className="small" style={{ color: '#475569' }}>
+                  If set, buyers will see the expiry and cannot checkout after it passes.
+                </div>
+              </div>
             )}
 
             <button type="submit" style={styles.submitButton} disabled={loading}>

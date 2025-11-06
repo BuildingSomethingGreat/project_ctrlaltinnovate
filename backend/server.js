@@ -834,23 +834,29 @@ app.post('/api/create-checkout-session', async (req, res) => {
     if (!linkSnap.exists) return res.status(404).send({ error: 'link not found' });
     const link = linkSnap.data();
 
+    // Enforce expiration for any link
+    if (link.expiresAt && new Date(link.expiresAt) <= new Date()) {
+      return res.status(400).json({ error: 'This link has expired.' });
+    }
+
     const pSnap = await db.collection('products').doc(link.productId).get();
     if (!pSnap.exists) return res.status(404).send({ error: 'product not found' });
     const product = pSnap.data();
 
-    // If auction is active, block checkout. If finalized, use highest bid as price.
-    let unitAmount = product.price_cents || null;
-    if (link.auction?.enabled) {
-      if (link.auction.status !== 'finalized') {
-        return res.status(400).json({ error: 'Auction is active; checkout will be available after the bid closes.' });
-      }
-      const highest = await getHighestBid(linkId);
-      if (!highest?.amount_cents || highest.amount_cents <= 0) {
-        return res.status(400).json({ error: 'No winning bid found for finalized auction.' });
-      }
-      unitAmount = highest.amount_cents;
+    // If auction is active, block checkout (buy is hidden on page)
+    if (link.auction?.enabled && link.auction.status !== 'finalized') {
+      return res.status(400).json({ error: 'Auction is active; checkout will be available after the bid closes.' });
     }
 
+    // Determine amount (supports finalized auctions using highest bid; otherwise product price)
+    let unitAmount = product.price_cents || null;
+    if (link.auction?.enabled && link.auction.status === 'finalized') {
+      const highest = await db.collection('links').doc(linkId).collection('bids')
+        .orderBy('amount_cents', 'desc').limit(1).get();
+      const top = highest.empty ? null : highest.docs[0].data();
+      if (!top?.amount_cents) return res.status(400).json({ error: 'No winning bid found for finalized auction.' });
+      unitAmount = top.amount_cents;
+    }
     if (!Number.isInteger(unitAmount) || unitAmount <= 0) {
       return res.status(400).json({ error: 'Price is missing or invalid for checkout.' });
     }
@@ -867,7 +873,7 @@ app.post('/api/create-checkout-session', async (req, res) => {
       line_items: [{
         price_data: {
           currency: product.currency || 'usd',
-          unit_amount: unitAmount, // UPDATED: highest bid for finalized auctions
+          unit_amount: unitAmount,
           product_data: {
             name: product.title,
             description: product.description || undefined,
