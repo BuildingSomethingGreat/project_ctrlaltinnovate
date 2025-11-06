@@ -64,12 +64,27 @@
 
     <div class="title">{{product.title}}</div>
     <div class="desc">{{product.description}}</div>
-    <div class="price">${{product.price_display}}</div>
-{{#hasDigital}}
+    <div class="price">$<span id="priceEl">{{product.price_display}}</span></div>
+    {{#hasDigital}}
       <div class="note">
         Upon checkout completion, your downloadable file will be processed and delivered shortly.
       </div>
     {{/hasDigital}}
+
+    {{#link.auction.enabled}}
+      <div class="note" id="auctionBox">
+        <div style="font-weight:600;margin-bottom:6px;">Live Auction</div>
+        <div id="auctionStatus">Ends: {{link.auction.endsAt}}</div>
+        <div id="highest">Highest bid: —</div>
+        <div style="margin-top:8px;">
+          <input id="bidEmail" type="email" placeholder="your@email.com" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;" />
+          <input id="bidAmount" type="number" min="0" step="0.01" placeholder="Your bid (USD)" style="width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px;" />
+          <button id="placeBid" class="btn" type="button">Place bid</button>
+          <div id="bidMsg" class="small" style="margin-top:8px;"></div>
+        </div>
+      </div>
+    {{/link.auction.enabled}}
+
     <button id="buyBtn" class="btn">Buy now</button>
     <div class="small">Secure checkout powered by Stripe.</div>
 
@@ -98,6 +113,91 @@
         buyBtn.disabled = false; buyBtn.textContent = 'Buy now';
       }
     });
+
+    // Auction client (polling)
+    const auctionEnabled = {{#link.auction.enabled}}true{{/link.auction.enabled}}{{^link.auction.enabled}}false{{/link.auction.enabled}};
+    if (auctionEnabled && buyBtn) {
+      // Hide buy button while auction is active
+      buyBtn.style.display = 'none';
+    }
+
+    if (auctionEnabled) {
+      const highestEl = document.getElementById('highest');
+      const statusEl = document.getElementById('auctionStatus');
+      const msgEl = document.getElementById('bidMsg');
+      const emailEl = document.getElementById('bidEmail');
+      const amountEl = document.getElementById('bidAmount');
+      const placeBidBtn = document.getElementById('placeBid');
+      const priceEl = document.getElementById('priceEl');
+
+      async function refreshAuction() {
+        try {
+          const res = await fetch('/api/bids/{{link.linkId}}/summary');
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Failed');
+
+          // Update price on page to the current highest (or starting) bid
+          const currentCents = (json.highest_cents || json.auction.startingPrice_cents || 0);
+          if (priceEl) priceEl.textContent = (currentCents / 100).toFixed(2);
+
+          // Update highest label and status
+          const dollars = (json.highest_cents/100).toFixed(2);
+          highestEl.textContent = json.highest_cents
+            ? `Highest bid: $${dollars} (${json.highest_email_masked || ''})`
+            : 'No bids yet';
+          statusEl.textContent = json.auction.status === 'finalized'
+            ? 'Auction ended'
+            : `Ends: ${new Date(json.auction.endsAt).toLocaleString()}`;
+
+          // Toggle buy button: show only after the bid closes
+          if (buyBtn) {
+            if (json.auction.status === 'finalized') {
+              buyBtn.style.display = '';
+            } else {
+              buyBtn.style.display = 'none';
+            }
+          }
+
+          if (json.auction.status === 'finalized') {
+            placeBidBtn.disabled = true;
+            amountEl.disabled = true;
+            emailEl.disabled = true;
+          }
+        } catch (e) {
+          console.error('auction refresh err', e);
+        }
+      }
+
+      placeBidBtn?.addEventListener('click', async () => {
+        msgEl.textContent = '';
+        const email = emailEl.value.trim();
+        const amount = parseFloat(amountEl.value || '0');
+        if (!email || !(amount > 0)) {
+          msgEl.textContent = 'Enter a valid email and amount';
+          return;
+        }
+        placeBidBtn.disabled = true;
+        try {
+          const res = await fetch('/api/bids', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ linkId: '{{link.linkId}}', email, amount_cents: Math.round(amount * 100) })
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Bid failed');
+          msgEl.textContent = 'Bid placed!';
+          amountEl.value = '';
+          await refreshAuction();
+        } catch (e) {
+          msgEl.textContent = e.message || 'Bid failed';
+        } finally {
+          placeBidBtn.disabled = false;
+        }
+      });
+
+      refreshAuction();
+      setInterval(refreshAuction, 5000);
+    }
   </script>
 </body>
 </html>

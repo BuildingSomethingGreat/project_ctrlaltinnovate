@@ -472,16 +472,16 @@ app.post('/api/products', async (req, res) => {
     const {
       sellerId, title, description, price_cents, currency,
       image_url, inventory, checkoutSchema,
-      digitalFileUrl // optional public URL
+      digitalFileUrl // optional
     } = req.body;
 
-    if (!sellerId || !title || !price_cents) {
-      return res.status(400).json({ error: 'sellerId, title, and price_cents are required' });
+    if (!sellerId || !title) {
+      return res.status(400).json({ error: 'sellerId and title are required' });
     }
 
     const productRef = db.collection('products').doc();
 
-    // If a public URL is provided, fetch and upload to Storage first
+    // Optional: stage remote digital file if provided (existing helper)
     let digitalDownload = null;
     if (digitalFileUrl) {
       try {
@@ -500,7 +500,8 @@ app.post('/api/products', async (req, res) => {
       sellerId,
       title,
       description: description || '',
-      price_cents,
+      // price_cents is now optional to support auction-only flows
+      price_cents: Number.isInteger(price_cents) ? price_cents : null,
       currency: (currency || 'usd').toLowerCase(),
       image_url: image_url || null,
       inventory: typeof inventory === 'number' ? inventory : null,
@@ -511,9 +512,8 @@ app.post('/api/products', async (req, res) => {
         buttonColor: '#2563eb',
         textColor: '#0f172a'
       },
-      // normalized schema
-      digitalDownload: digitalDownload || null,
-      hasDigital: Boolean(digitalDownload) // convenience flag
+      digitalDownload,
+      hasDigital: Boolean(digitalDownload)
     };
 
     await productRef.set(product);
@@ -548,21 +548,20 @@ app.post('/api/products/:productId/associate', verifyFirebaseToken, async (req, 
 /**
  * Create short link
  * POST /api/links
- * body: { productId, sellerId, email, expiresAt, digitalFileUrl }
+ * body: { productId, sellerId, email, expiresAt, digitalFileUrl, auction?: { enabled, endsAt, startingPrice_cents, minIncrement_cents } }
  */
 app.post('/api/links', async (req, res) => {
   try {
-    const { productId, sellerId, email, expiresAt, digitalFileUrl } = req.body;
+    const { productId, sellerId, email, expiresAt, digitalFileUrl, auction } = req.body;
     if (!productId) return res.status(400).json({ error: 'productId required' });
 
     const productSnap = await db.collection('products').doc(productId).get();
     if (!productSnap.exists) return res.status(404).json({ error: 'product not found' });
     const product = productSnap.data();
 
-    // Create linkId first so we can include it in the storage path
     const linkId = nanoid(7).toUpperCase();
 
-    // If link-level URL provided, stage to Storage; else snapshot product's digitalDownload
+    // Stage link-level digital if provided, else snapshot product
     let linkDigital = null;
     if (digitalFileUrl) {
       try {
@@ -578,8 +577,21 @@ app.post('/api/links', async (req, res) => {
     } else {
       linkDigital = product.digitalDownload || null;
     }
-
     const hasDigital = Boolean(linkDigital && (linkDigital.storagePath || linkDigital.contentUrl));
+
+    // Auction config
+    let auctionCfg = null;
+    if (auction?.enabled) {
+      if (!auction.endsAt) return res.status(400).json({ error: 'auction.endsAt required when auction.enabled' });
+      const endsAtIso = new Date(auction.endsAt).toISOString();
+      auctionCfg = {
+        enabled: true,
+        endsAt: endsAtIso,
+        startingPrice_cents: Number.isInteger(auction.startingPrice_cents) ? auction.startingPrice_cents : (product.price_cents || 0),
+        minIncrement_cents: Number.isInteger(auction.minIncrement_cents) ? auction.minIncrement_cents : 100,
+        status: 'active'
+      };
+    }
 
     const linkDoc = {
       linkId,
@@ -587,9 +599,11 @@ app.post('/api/links', async (req, res) => {
       sellerId: sellerId || product.sellerId,
       email: email || null,
       createdAt: new Date().toISOString(),
-      expiresAt: expiresAt || null,
+      // If auction provided, force expiresAt to endsAt
+      expiresAt: auctionCfg?.endsAt || expiresAt || null,
       digitalDownload: linkDigital,
-      hasDigital
+      hasDigital,
+      ...(auctionCfg ? { auction: auctionCfg } : {})
     };
 
     await db.collection('links').doc(linkId).set(linkDoc);
@@ -597,9 +611,176 @@ app.post('/api/links', async (req, res) => {
     const baseUrl = process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
     const pageUrl = `${baseUrl}/p/${linkId}${hasDigital ? '?digital=1' : ''}`;
 
-    res.json({ linkId, pageUrl, hasDigital });
+    res.json({ linkId, pageUrl, hasDigital, auction: auctionCfg || null });
   } catch (err) {
     console.error('Error creating payment link:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Auction helpers ---
+async function getHighestBid(linkId) {
+  const bidsSnap = await db.collection('links').doc(linkId).collection('bids')
+    .orderBy('amount_cents', 'desc').limit(1).get();
+  if (bidsSnap.empty) return null;
+  const doc = bidsSnap.docs[0];
+  return { bidId: doc.id, ...doc.data() };
+}
+
+async function finalizeAuction(link) {
+  if (!link?.auction?.enabled) return null;
+  if (link.auction.status === 'finalized') return link;
+
+  const now = new Date();
+  const ended = new Date(link.auction.endsAt) <= now;
+  if (!ended) return link;
+
+  const highest = await getHighestBid(link.linkId);
+  const winner = highest ? { email: highest.email, bidId: highest.bidId, amount_cents: highest.amount_cents } : null;
+
+  // Persist finalization
+  await db.collection('links').doc(link.linkId).update({
+    'auction.status': 'finalized',
+    'auction.winner': winner || null,
+    active: false
+  });
+
+  // If winner exists, create a standard purchase link and email them
+  if (winner) {
+    try {
+      const pSnap = await db.collection('products').doc(link.productId).get();
+      const product = pSnap.data();
+      const sSnap = await db.collection('sellers').doc(link.sellerId).get();
+      const seller = sSnap.data();
+
+      // Create winner-only purchase link valid for 48h
+      const winnerLinkId = nanoid(7).toUpperCase();
+      const expiresAt = new Date(Date.now() + 48 * 3600 * 1000).toISOString();
+      const winnerLinkDoc = {
+        linkId: winnerLinkId,
+        productId: link.productId,
+        sellerId: link.sellerId,
+        createdAt: new Date().toISOString(),
+        expiresAt,
+        // snapshot digital if any
+        digitalDownload: link.digitalDownload || product.digitalDownload || null,
+        hasDigital: Boolean((link.digitalDownload && (link.digitalDownload.storagePath || link.digitalDownload.contentUrl)) ||
+          (product.digitalDownload && (product.digitalDownload.storagePath || product.digitalDownload.contentUrl)))
+      };
+      await db.collection('links').doc(winnerLinkId).set(winnerLinkDoc);
+      const baseUrl = process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
+      const winnerPageUrl = `${baseUrl}/p/${winnerLinkId}${winnerLinkDoc.hasDigital ? '?digital=1' : ''}`;
+
+      // Email winner with payment link
+      const emailHtml = generateEmailTemplate({
+        appName: 'CtrlAltInnovate',
+        title: 'You won the auction!',
+        message: `Congrats! You won the auction for <strong>${product.title}</strong> with a bid of $${(winner.amount_cents / 100).toFixed(2)}.`,
+        details: `<a href="${winnerPageUrl}" style="color:#2563eb;font-weight:600;">Complete your purchase</a><div style="margin-top:8px;">Link expires: ${new Date(expiresAt).toLocaleString()}</div>`
+      });
+      await resend.emails.send({
+        from: process.env.RESEND_FROM_EMAIL || 'no-reply@ctrlaltinnovate.com',
+        to: winner.email,
+        subject: 'You won the auction!',
+        html: emailHtml
+      });
+    } catch (e) {
+      console.error('Failed to email auction winner:', e);
+    }
+  }
+
+  const updated = await db.collection('links').doc(link.linkId).get();
+  return updated.data();
+}
+
+// --- Auction routes ---
+
+/**
+ * Place a bid
+ * POST /api/bids
+ * body: { linkId, email, amount_cents }
+ */
+app.post('/api/bids', async (req, res) => {
+  try {
+    const { linkId, email, amount_cents } = req.body;
+    if (!linkId || !email || !Number.isInteger(amount_cents)) {
+      return res.status(400).json({ error: 'linkId, email, amount_cents required' });
+    }
+
+    const lRef = db.collection('links').doc(linkId);
+    const lSnap = await lRef.get();
+    if (!lSnap.exists) return res.status(404).json({ error: 'link not found' });
+    let link = lSnap.data();
+
+    if (!link.auction?.enabled) return res.status(400).json({ error: 'auction not enabled for this link' });
+
+    // Expiration check and finalize if needed
+    const now = new Date();
+    const ended = new Date(link.auction.endsAt) <= now;
+    if (ended) {
+      link = await finalizeAuction(link);
+      return res.status(400).json({ error: 'auction ended', auction: link.auction });
+    }
+
+    const highest = await getHighestBid(linkId);
+    const minRequired = highest
+      ? highest.amount_cents + (link.auction.minIncrement_cents || 100)
+      : (link.auction.startingPrice_cents || 0);
+
+    if (amount_cents < minRequired) {
+      return res.status(400).json({ error: `minimum bid is ${minRequired}`, minRequired_cents: minRequired, highest_cents: highest?.amount_cents || 0 });
+    }
+
+    const bidId = nanoid(10);
+    const bidDoc = {
+      bidId,
+      email: String(email).toLowerCase(),
+      amount_cents,
+      createdAt: new Date().toISOString()
+    };
+
+    await lRef.collection('bids').doc(bidId).set(bidDoc);
+    return res.json({ ok: true, bid: bidDoc });
+  } catch (err) {
+    console.error('place bid err', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Get auction summary
+ * GET /api/bids/:linkId/summary
+ */
+app.get('/api/bids/:linkId/summary', async (req, res) => {
+  try {
+    const { linkId } = req.params;
+    const lRef = db.collection('links').doc(linkId);
+    const lSnap = await lRef.get();
+    if (!lSnap.exists) return res.status(404).json({ error: 'link not found' });
+    let link = lSnap.data();
+
+    if (!link.auction?.enabled) return res.status(400).json({ error: 'auction not enabled for this link' });
+
+    // If ended but not finalized, finalize now
+    const now = new Date();
+    if (new Date(link.auction.endsAt) <= now && link.auction.status !== 'finalized') {
+      link = await finalizeAuction(link);
+    }
+
+    // Count + highest
+    const bidsSnap = await lRef.collection('bids').orderBy('createdAt', 'desc').limit(10).get();
+    const bids = bidsSnap.docs.map(d => d.data());
+    const highest = await getHighestBid(linkId);
+
+    return res.json({
+      auction: link.auction,
+      highest_cents: highest?.amount_cents || 0,
+      highest_email_masked: highest ? (highest.email.replace(/(.{2}).+(@.+)/, '$1****$2')) : null,
+      count: (await lRef.collection('bids').count().get()).data().count || bids.length,
+      recent: bids
+    });
+  } catch (err) {
+    console.error('summary err', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -653,9 +834,26 @@ app.post('/api/create-checkout-session', async (req, res) => {
     if (!linkSnap.exists) return res.status(404).send({ error: 'link not found' });
     const link = linkSnap.data();
 
-    const productSnap = await db.collection('products').doc(link.productId).get();
-    if (!productSnap.exists) return res.status(404).send({ error: 'product not found' });
-    const product = productSnap.data();
+    const pSnap = await db.collection('products').doc(link.productId).get();
+    if (!pSnap.exists) return res.status(404).send({ error: 'product not found' });
+    const product = pSnap.data();
+
+    // If auction is active, block checkout. If finalized, use highest bid as price.
+    let unitAmount = product.price_cents || null;
+    if (link.auction?.enabled) {
+      if (link.auction.status !== 'finalized') {
+        return res.status(400).json({ error: 'Auction is active; checkout will be available after the bid closes.' });
+      }
+      const highest = await getHighestBid(linkId);
+      if (!highest?.amount_cents || highest.amount_cents <= 0) {
+        return res.status(400).json({ error: 'No winning bid found for finalized auction.' });
+      }
+      unitAmount = highest.amount_cents;
+    }
+
+    if (!Number.isInteger(unitAmount) || unitAmount <= 0) {
+      return res.status(400).json({ error: 'Price is missing or invalid for checkout.' });
+    }
 
     const hasDigital = Boolean(
       (link.digitalDownload && (link.digitalDownload.storagePath || link.digitalDownload.contentUrl)) ||
@@ -666,11 +864,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
     const successUrl = `${origin}/success?session_id={CHECKOUT_SESSION_ID}${hasDigital ? '&digital=1' : ''}`;
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
       line_items: [{
         price_data: {
           currency: product.currency || 'usd',
-          unit_amount: product.price_cents,
+          unit_amount: unitAmount, // UPDATED: highest bid for finalized auctions
           product_data: {
             name: product.title,
             description: product.description || undefined,
@@ -682,16 +879,18 @@ app.post('/api/create-checkout-session', async (req, res) => {
       mode: 'payment',
       success_url: successUrl,
       cancel_url: `${origin}/p/${linkId}`,
-      metadata: {
-        linkId,
-        productId: product.productId,
-        sellerId: link.sellerId || product.sellerId
+      payment_intent_data: {
+        metadata: {
+          linkId,
+          productId: product.productId,
+          sellerId: link.sellerId || product.sellerId
+        }
       }
     });
 
     res.json({ url: session.url });
   } catch (err) {
-    console.error('Create checkout session error:', err);
+    console.error('checkout session error:', err);
     res.status(500).send({ error: err.message });
   }
 });

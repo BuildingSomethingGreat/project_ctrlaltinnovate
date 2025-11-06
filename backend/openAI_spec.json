@@ -64,6 +64,12 @@
             "updatedAt": {
               "type": "string",
               "format": "date-time"
+            },
+            "contentUrl": {
+              "type": "string",
+              "format": "uri",
+              "nullable": true,
+              "description": "Public URL source when file is not stored in GCS"
             }
           }
         },
@@ -117,7 +123,9 @@
               "type": "string"
             },
             "price_cents": {
-              "type": "integer"
+              "type": "integer",
+              "nullable": true,
+              "description": "Optional when auction is enabled; when present, amount in cents."
             },
             "currency": {
               "type": "string"
@@ -144,6 +152,10 @@
             },
             "digitalDownload": {
               "$ref": "#/components/schemas/DigitalDownload"
+            },
+            "hasDigital": {
+              "type": "boolean",
+              "description": "Convenience flag set when a digital download exists"
             },
             "createdAt": {
               "type": "string",
@@ -301,6 +313,58 @@
             "error": {
               "type": "string"
             }
+          }
+        },
+        "CheckoutSessionMetadata": {
+          "type": "object",
+          "description": "Metadata applied to the Stripe Checkout Session (not returned by this API; documented for reference).",
+          "properties": {
+            "linkId": { "type": "string" },
+            "productId": { "type": "string" },
+            "sellerId": { "type": "string" },
+            "hasDigital": {
+              "type": "string",
+              "enum": ["0", "1"],
+              "description": "Set to '1' when a digital download exists; otherwise '0'. May be omitted in some builds."
+            }
+          },
+          "required": ["linkId", "productId", "sellerId"]
+        },
+        "Auction": {
+          "type": "object",
+          "description": "Auction configuration and state attached to a link.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "endsAt": { "type": "string", "format": "date-time" },
+            "startingPrice_cents": { "type": "integer", "description": "Starting bid (in cents)" },
+            "minIncrement_cents": { "type": "integer", "description": "Minimum increment (in cents)" },
+            "status": { "type": "string", "enum": ["active", "finalized"] },
+            "winner": {
+              "type": "object",
+              "nullable": true,
+              "properties": {
+                "email": { "type": "string", "format": "email" },
+                "bidId": { "type": "string" },
+                "amount_cents": { "type": "integer" }
+              }
+            }
+          },
+          "required": ["enabled", "endsAt"]
+        },
+        "Bid": {
+          "type": "object",
+          "properties": {
+            "bidId": { "type": "string" },
+            "email": { "type": "string", "format": "email" },
+            "amount_cents": { "type": "integer" },
+            "createdAt": { "type": "string", "format": "date-time" }
+          },
+          "required": ["bidId", "email", "amount_cents", "createdAt"]
+        },
+        "LinkDoc": {
+          "type": "object",
+          "properties": {
+            "auction": { "$ref": "#/components/schemas/Auction" }
           }
         }
       }
@@ -467,8 +531,7 @@
                   "additionalProperties": false,
                   "required": [
                     "sellerId",
-                    "title",
-                    "price_cents"
+                    "title"
                   ],
                   "properties": {
                     "sellerId": {
@@ -482,7 +545,8 @@
                     },
                     "price_cents": {
                       "type": "integer",
-                      "description": "Amount in cents"
+                      "nullable": true,
+                      "description": "Optional when auction is enabled; amount in cents."
                     },
                     "currency": {
                       "type": "string",
@@ -499,6 +563,12 @@
                     },
                     "checkoutSchema": {
                       "$ref": "#/components/schemas/CheckoutSchema"
+                    },
+                    "digitalFileUrl": {
+                      "type": "string",
+                      "format": "uri",
+                      "nullable": true,
+                      "description": "Optional public URL; server stages to Storage and normalizes to digitalDownload."
                     }
                   }
                 },
@@ -516,7 +586,8 @@
                     "accentColor": "#2563eb",
                     "buttonColor": "#2563eb",
                     "textColor": "#0f172a"
-                  }
+                  },
+                  "digitalFileUrl": "https://cdn.example.com/files/guide.pdf"
                 }
               }
             }
@@ -759,26 +830,44 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "productId",
-                    "sellerId"
+                    "productId"
                   ],
                   "properties": {
                     "productId": {
                       "type": "string"
                     },
                     "sellerId": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email",
+                      "nullable": true
                     },
                     "expiresAt": {
                       "type": "string",
                       "format": "date-time",
                       "nullable": true
+                    },
+                    "digitalFileUrl": {
+                      "type": "string",
+                      "format": "uri",
+                      "nullable": true,
+                      "description": "Optional public URL; server stages to Storage and snapshots into link.digitalDownload"
+                    },
+                    "auction": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "Enable bidding for this link. When enabled, link.expiresAt will be set to auction.endsAt.",
+                      "properties": {
+                        "enabled": { "type": "boolean" },
+                        "endsAt": { "type": "string", "format": "date-time" },
+                        "startingPrice_cents": { "type": "integer", "nullable": true },
+                        "minIncrement_cents": { "type": "integer", "nullable": true }
+                      }
                     }
                   }
-                },
-                "example": {
-                  "productId": "prod_abc123",
-                  "sellerId": "SELLER_123"
                 }
               }
             }
@@ -800,7 +889,8 @@
                       },
                       "hasDigital": {
                         "type": "boolean"
-                      }
+                      },
+                      "auction": { "$ref": "#/components/schemas/Auction" }
                     }
                   },
                   "examples": {
@@ -809,6 +899,20 @@
                         "linkId": "K3P9JQW",
                         "pageUrl": "https://pay.yourapp.com/p/K3P9JQW?digital=1",
                         "hasDigital": true
+                      }
+                    },
+                    "auctionEnabled": {
+                      "value": {
+                        "linkId": "K3P9JQW",
+                        "pageUrl": "https://pay.example.com/p/K3P9JQW",
+                        "hasDigital": false,
+                        "auction": {
+                          "enabled": true,
+                          "endsAt": "2025-12-31T23:59:59.000Z",
+                          "startingPrice_cents": 5000,
+                          "minIncrement_cents": 100,
+                          "status": "active"
+                        }
                       }
                     }
                   }
@@ -890,8 +994,8 @@
       "/api/create-checkout-session": {
         "post": {
           "operationId": "createCheckoutSession",
-          "summary": "Create Stripe Checkout Session for a link",
-          "description": "Builds success_url internally (adds &digital=1 when applicable). Populates metadata with linkId/productId/sellerId/hasDigital. Returns the hosted Checkout URL.",
+          "summary": "Create Stripe Checkout Session for a link (auction-aware)",
+          "description": "Creates a Stripe Checkout Session for the provided linkId. If the link has an active auction (status=active), returns 400. If the auction is finalized, the highest bid amount is used as the price. Appends digital=1 to success_url when a digital download exists.",
           "requestBody": {
             "required": true,
             "content": {
@@ -915,11 +1019,44 @@
           },
           "responses": {
             "200": {
-              "description": "Checkout session created",
+              "description": "Checkout session created; URL returned",
               "content": {
                 "application/json": {
                   "schema": {
                     "$ref": "#/components/schemas/CreateCheckoutSessionResponse"
+                  },
+                  "examples": {
+                    "withDigital": {
+                      "summary": "Digital product - success URL includes digital=1",
+                      "value": {
+                        "url": "https://checkout.stripe.com/c/pay/cs_test_123"
+                      }
+                    },
+                    "withoutDigital": {
+                      "summary": "Non-digital product",
+                      "value": {
+                        "url": "https://checkout.stripe.com/c/pay/cs_test_456"
+                      }
+                    }
+                  }
+                }
+              },
+              "x-stripe-metadata": {
+                "$ref": "#/components/schemas/CheckoutSessionMetadata"
+              },
+              "x-stripe-metadata-example": {
+                "linkId": "K3P9JQW",
+                "productId": "prod_abc123",
+                "sellerId": "SELLER_123",
+                "hasDigital": "1"
+              }
+            },
+            "400": {
+              "description": "Auction is active or price missing/invalid for checkout",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Error"
                   }
                 }
               }
@@ -1183,9 +1320,7 @@
               "description": "No products found or product not found",
               "content": {
                 "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             },
@@ -1193,9 +1328,7 @@
               "description": "Server error",
               "content": {
                 "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -1252,12 +1385,80 @@
               "description": "Server error",
               "content": {
                 "application/json": {
-                  "schema": {
-                    "$ref": "#/components/schemas/Error"
-                  }
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
+          }
+        }
+      },
+      "/api/bids": {
+        "post": {
+          "operationId": "placeBid",
+          "summary": "Place a bid on an auction-enabled link",
+          "requestBody": {
+            "required": true,
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["linkId", "email", "amount_cents"],
+                  "properties": {
+                    "linkId": { "type": "string" },
+                    "email": { "type": "string", "format": "email" },
+                    "amount_cents": { "type": "integer", "minimum": 1 }
+                  }
+                },
+                "example": { "linkId": "K3P9JQW", "email": "buyer@example.com", "amount_cents": 5500 }
+              }
+            }
+          },
+          "responses": {
+            "200": {
+              "description": "Bid placed",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": { "ok": { "type": "boolean" }, "bid": { "$ref": "#/components/schemas/Bid" } }
+                  }
+                }
+              }
+            },
+            "400": { "description": "Invalid request or auction ended" },
+            "404": { "description": "Link not found" },
+            "5XX": { "description": "Server error" }
+          }
+        }
+      },
+      "/api/bids/{linkId}/summary": {
+        "get": {
+          "operationId": "getAuctionSummary",
+          "summary": "Get current auction status, highest bid, and recent bids for a link",
+          "parameters": [
+            { "name": "linkId", "in": "path", "required": true, "schema": { "type": "string" } }
+          ],
+          "responses": {
+            "200": {
+              "description": "Auction summary",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "properties": {
+                      "auction": { "$ref": "#/components/schemas/Auction" },
+                      "highest_cents": { "type": "integer" },
+                      "highest_email_masked": { "type": "string", "nullable": true },
+                      "count": { "type": "integer" },
+                      "recent": { "type": "array", "items": { "$ref": "#/components/schemas/Bid" } }
+                    }
+                  }
+                }
+              }
+            },
+            "400": { "description": "Auction not enabled for this link" },
+            "404": { "description": "Link not found" },
+            "5XX": { "description": "Server error" }
           }
         }
       }

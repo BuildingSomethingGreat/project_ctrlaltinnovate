@@ -16,6 +16,10 @@ function ProductForm() {
     imageUrl: '', // For image URL
     digitalFile: null, // NEW: digital download file
     digitalFileUrl: '', // NEW: public URL for digital download (optional)
+    auctionEnabled: false,
+    auctionEndsAt: '', // e.g. 2025-01-31T23:59
+    auctionStartingPrice: '',
+    auctionMinIncrement: '',
     checkoutSchema: {
       backgroundColor: '#f7fafc',
       buttonColor: '#2563eb',
@@ -69,11 +73,11 @@ function ProductForm() {
     setError(null);
 
     try {
-      // Validate form data
-      if (!formData.productName || !formData.price || !formData.sellerEmail) {
+      const priceRequired = !formData.auctionEnabled;
+      if (!formData.productName || !formData.sellerEmail || (priceRequired && !formData.price)) {
         setValidationErrors({
           productName: !formData.productName ? 'Product name is required' : '',
-          price: !formData.price ? 'Price is required' : '',
+          price: (priceRequired && !formData.price) ? 'Price is required unless auction is enabled' : '',
           sellerEmail: !formData.sellerEmail ? 'Seller email is required' : ''
         });
         setLoading(false);
@@ -97,11 +101,13 @@ function ProductForm() {
         sellerId: seller.sellerId, // Use the created sellerId
         title: formData.productName,
         description: formData.description,
-        price_cents: Math.round(parseFloat(formData.price) * 100),
-        currency: formData.currency.toLowerCase(),
+        currency: (formData.currency || 'USD').toLowerCase(),
         image_url: finalImageUrl,
         checkoutSchema: formData.checkoutSchema,
-        digitalFileUrl: formData.digitalFileUrl || null // NEW
+        // include price only when provided (auction may omit)
+        ...(formData.price ? { price_cents: Math.round(parseFloat(formData.price) * 100) } : {}),
+        // optional digital URL passthrough
+        ...(formData.digitalFileUrl ? { digitalFileUrl: formData.digitalFileUrl } : {})
       };
 
       const { product } = await createProduct(productData); // Use createProduct from api.js
@@ -118,7 +124,13 @@ function ProductForm() {
         sellerId: product.sellerId,
         email: formData.sellerEmail,
         expiresAt: formData.expirationDate || null, // Include expiration date if provided
-        digitalFileUrl: formData.digitalFileUrl || null // NEW
+        digitalFileUrl: formData.digitalFileUrl || null, // NEW
+        auction: formData.auctionEnabled ? {
+          enabled: true,
+          endsAt: formData.auctionEndsAt,
+          startingPrice_cents: formData.auctionStartingPrice ? Math.round(parseFloat(formData.auctionStartingPrice) * 100) : undefined,
+          minIncrement_cents: formData.auctionMinIncrement ? Math.round(parseFloat(formData.auctionMinIncrement) * 100) : undefined
+        } : undefined
       };
 
       console.log('Creating payment link with data:', paymentLinkData); // Debug log
@@ -283,6 +295,52 @@ function ProductForm() {
                 style={styles.input}
               />
             </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>
+                <input
+                  type="checkbox"
+                  checked={formData.auctionEnabled}
+                  onChange={(e) => setFormData({ ...formData, auctionEnabled: e.target.checked })}
+                />
+                {' '}Enable Auction/Bidding
+              </label>
+            </div>
+            {formData.auctionEnabled && (
+              <>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Auction Ends At</label>
+                  <input
+                    type="datetime-local"
+                    value={formData.auctionEndsAt}
+                    onChange={(e) => setFormData({ ...formData, auctionEndsAt: e.target.value })}
+                    style={styles.input}
+                  />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Starting Price (USD)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.auctionStartingPrice}
+                    onChange={(e) => setFormData({ ...formData, auctionStartingPrice: e.target.value })}
+                    style={styles.input}
+                  />
+                </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>Min Increment (USD)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.auctionMinIncrement}
+                    onChange={(e) => setFormData({ ...formData, auctionMinIncrement: e.target.value })}
+                    style={styles.input}
+                  />
+                </div>
+              </>
+            )}
 
             <button type="submit" style={styles.submitButton} disabled={loading}>
               {loading ? 'Creating...' : 'Generate Link'}
