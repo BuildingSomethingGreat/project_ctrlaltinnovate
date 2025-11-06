@@ -18,7 +18,6 @@ const privateKey = JSON.parse(process.env.FIREBASE_PRIVATE_KEY).private_key.repl
 
 const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY);
-
 // const { generateEmailTemplate } = require('./utils/emailTemplate');
 
 // Update email template branding: header logo, green accents, default app name "InstaPay"
@@ -147,125 +146,23 @@ async function stageRemoteUrlToStorage({ productId, url, linkId }) {
   };
 }
 
+function baseUrl() {
+  return process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
+}
+
+async function findSellerByEmail(email) {
+  const snap = await db.collection('sellers').where('email', '==', String(email).toLowerCase()).limit(1).get();
+  if (snap.empty) return null;
+  const doc = snap.docs[0];
+  return { id: doc.id, ...doc.data() };
+}
+
 const app = express();
 
 // Serve static files from the React frontend app
 app.use(express.static(path.join(__dirname, '../frontend/build')));
 
-/**
- * Auto-fulfill digital orders:
- * - Attaches digital file (from product or link snapshot) and emails buyer with product image.
- * - After buyer email is sent successfully, emails seller that the order was auto-fulfilled.
- * Returns true if fulfillment email sent to buyer; otherwise false.
- */
-async function autoFulfillDigitalOrder(session) {
-  try {
-    const linkId = session.metadata?.linkId;
-    const productId = session.metadata?.productId;
-    const sellerId = session.metadata?.sellerId;
-    if (!productId || !sellerId) return false;
-
-    const [productSnap, sellerSnap, linkSnap] = await Promise.all([
-      db.collection('products').doc(productId).get(),
-      db.collection('sellers').doc(sellerId).get(),
-      linkId ? db.collection('links').doc(linkId).get() : Promise.resolve({ exists: false })
-    ]);
-    if (!productSnap.exists || !sellerSnap.exists) return false;
-
-    const product = productSnap.data();
-    const seller = sellerSnap.data();
-    const link = linkSnap.exists ? linkSnap.data() : null;
-
-    // ADD: normalize digital (fallback to legacy digitalFileUrl)
-    const digital =
-      product.digitalDownload ||
-      link?.digitalDownload ||
-      (product.digitalFileUrl ? buildDigitalDownloadFromUrl(product.digitalFileUrl) : null) ||
-      (link?.digitalFileUrl ? buildDigitalDownloadFromUrl(link.digitalFileUrl) : null);
-
-    if (!digital) return false;
-
-    const buyerEmail = session.customer_details?.email || session.customer_email || null;
-    if (!buyerEmail) return false;
-
-    // Prepare attachment from storagePath or contentUrl
-    let attachment = null;
-
-    if (digital.storagePath) {
-      const fileRef = bucket.file(digital.storagePath);
-      const [buffer] = await fileRef.download();
-      const base64 = Buffer.from(buffer).toString('base64'); // Resend expects base64
-      attachment = {
-        filename: digital.fileName || 'download',
-        content: base64,
-        contentType: digital.contentType || 'application/octet-stream'
-      };
-    } else if (digital.contentUrl) {
-      // Explicit fetch with Node 18+ or dynamic import fallback
-      const doFetch = global.fetch ? global.fetch.bind(global) : (await import('node-fetch')).default;
-      const resp = await doFetch(digital.contentUrl);
-      if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        const buffer = Buffer.from(ab);
-        const base64 = buffer.toString('base64'); // Resend expects base64
-        attachment = {
-          filename: digital.fileName || 'download',
-          content: base64,
-          contentType: digital.contentType || resp.headers.get('content-type') || 'application/octet-stream'
-        };
-      } else {
-        console.warn('Failed to fetch contentUrl for attachment:', digital.contentUrl, resp.status);
-      }
-    }
-
-    const buyerHtml = generateEmailTemplate({
-      appName: 'InstaPay',
-      title: 'Your download is ready',
-      message: `Thanks for your purchase of <strong>${product.title}</strong>. Your file is attached.`,
-      details: `
-        ${product.image_url ? `<img src="${product.image_url}" alt="${product.title}" style="max-width:100%; border-radius:8px; margin-bottom:12px;" />` : ''}
-        <div>Order total: ${formatPrice(session.amount_total, product.currency || 'usd')}</div>
-        ${(!attachment && digital.contentUrl) ? `<div style="margin-top:8px;">If the attachment is missing, you can also download your file here: <a href="${digital.contentUrl}">${digital.contentUrl}</a></div>` : ''}
-      `
-    });
-
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
-      to: buyerEmail,
-      subject: `Your ${product.title} download`,
-      html: buyerHtml,
-      ...(attachment ? { attachments: [attachment] } : {})
-    });
-
-    const sellerHtml = generateEmailTemplate({
-      appName: 'InstaPay',
-      title: 'Your order was automatically fulfilled',
-      message: `An order for <strong>${product.title}</strong> was automatically fulfilled via digital delivery.`,
-      details: `
-        <div>Buyer: ${buyerEmail}</div>
-        <div>Amount: ${formatPrice(session.amount_total, product.currency || 'usd')}</div>
-        ${product.image_url ? `<div style="margin-top:12px;"><img src="${product.image_url}" alt="${product.title}" style="max-width:100%; border-radius:8px;" /></div>` : ''}
-      `
-    });
-
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
-      to: seller.email,
-      subject: 'Your order was automatically fulfilled',
-      html: sellerHtml
-    });
-
-    return true;
-  } catch (err) {
-    console.error('autoFulfillDigitalOrder failure:', err);
-    return false;
-  }
-}
-
-/**
- * Webhook endpoint
- * POST /webhook
- */
+// Webhook stays BEFORE JSON parsing (needs raw body)
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -383,16 +280,246 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
   res.json({ received: true });
 });
 
+// Enable CORS and JSON parsing for all other routes
 app.use(cors());
 app.use(bodyParser.json());
 
-// Helpers
-function renderPaymentPage(product, link) {
-  const template = fs.readFileSync(path.join(__dirname, 'templates', 'payment_page.mustache'), 'utf8');
-  // ensure price_display present
-  product.price_display = formatPrice(product.price_cents, product.currency);
-  const html = mustache.render(template, { product, link });
-  return html;
+// Moved below body parser: getEmailFromReq + seller auth/resolve routes
+function getEmailFromReq(req) {
+  const b = req.body || {};
+  const q = req.query || {};
+  const h = req.headers || {};
+  const email =
+    b.email ||
+    b.sellerEmail ||
+    b.userEmail ||
+    q.email ||
+    q.sellerEmail ||
+    q.userEmail ||
+    h['x-email'] ||
+    h['x-user-email'];
+  return typeof email === 'string' ? email.toLowerCase().trim() : '';
+}
+
+// Request magic link (create seller if not exists; do NOT duplicate existing emails)
+app.post('/api/sellers/request-magic-link', async (req, res) => {
+  try {
+    const email = getEmailFromReq(req);
+    if (!email) return res.status(400).json({ error: 'email required' });
+
+    let seller = await findSellerByEmail(email);
+    if (!seller) {
+      const sellerId = nanoid(12);
+      const doc = { sellerId, email, emailVerified: false, createdAt: new Date().toISOString() };
+      await db.collection('sellers').doc(sellerId).set(doc);
+      seller = doc;
+    }
+
+    const token = nanoid(48);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await db.collection('emailTokens').doc(token).set({
+      token, email, sellerId: seller.sellerId, expiresAt, used: false, createdAt: new Date().toISOString()
+    });
+
+    const verifyUrl = `${baseUrl()}/api/auth/magic/verify?token=${encodeURIComponent(token)}`;
+    const html = generateEmailTemplate({
+      appName: 'InstaPay',
+      title: 'Verify your email',
+      message: 'Click the button below to verify your email and start creating payment links.',
+      details: `<a href="${verifyUrl}" style="display:inline-block;padding:10px 16px;background:#16a34a;color:#fff;border-radius:6px;text-decoration:none;">Verify Email</a>
+                <div style="margin-top:8px;font-size:12px;color:#6b7280;">This link expires in 15 minutes.</div>`
+    });
+
+    await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
+      to: email,
+      subject: 'Verify your email for InstaPay',
+      html
+    });
+
+    return res.json({ ok: true, sellerId: seller.sellerId, emailed: true });
+  } catch (err) {
+    console.error('request-magic-link err', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Verify magic token, mark seller verified, then redirect to frontend
+app.get('/api/auth/magic/verify', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).send('Missing token');
+
+    const tRef = db.collection('emailTokens').doc(String(token));
+    const tSnap = await tRef.get();
+    if (!tSnap.exists) return res.status(400).send('Invalid token');
+
+    const t = tSnap.data();
+    if (t.used) return res.status(400).send('Token already used');
+    if (new Date(t.expiresAt).getTime() < Date.now()) return res.status(400).send('Token expired');
+
+    await tRef.update({ used: true, usedAt: new Date().toISOString() });
+    await db.collection('sellers').doc(t.sellerId).set(
+      { emailVerified: true, emailVerifiedAt: new Date().toISOString() },
+      { merge: true }
+    );
+
+    const redirectTo = `${baseUrl()}/?verified=1&email=${encodeURIComponent(t.email)}`;
+    return res.redirect(302, redirectTo);
+  } catch (err) {
+    console.error('magic verify err', err);
+    res.status(500).send('Server error');
+  }
+});
+
+// Resolve seller by email (de-duplicate: reuse existing sellerId)
+app.get('/api/sellers/resolve', async (req, res) => {
+  try {
+    const email = getEmailFromReq(req);
+    if (!email) return res.status(400).json({ error: 'email required' });
+    const seller = await findSellerByEmail(email);
+    if (!seller) return res.json({ seller: null });
+    return res.json({
+      seller: {
+        sellerId: seller.sellerId || seller.id,
+        email: seller.email,
+        emailVerified: !!seller.emailVerified
+      }
+    });
+  } catch (err) {
+    console.error('resolve seller err', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Guard helpers
+async function requireVerifiedSellerById(sellerId) {
+  const snap = await db.collection('sellers').doc(String(sellerId)).get();
+  if (!snap.exists) return { ok: false, code: 'NOT_FOUND' };
+  const s = snap.data();
+  if (!s.emailVerified) return { ok: false, code: 'EMAIL_NOT_VERIFIED', seller: s };
+  return { ok: true, seller: s };
+}
+
+async function resolveVerifiedSellerFromEmailOrId({ email, sellerId }) {
+  if (sellerId) return requireVerifiedSellerById(sellerId);
+  if (email) {
+    const s = await findSellerByEmail(email);
+    if (!s) return { ok: false, code: 'NOT_FOUND' };
+    if (!s.emailVerified) return { ok: false, code: 'EMAIL_NOT_VERIFIED', seller: s };
+    return { ok: true, seller: s };
+  }
+  return { ok: false, code: 'MISSING_SELLER' };
+}
+
+/**
+ * Auto-fulfill digital orders:
+ * - Attaches digital file (from product or link snapshot) and emails buyer with product image.
+ * - After buyer email is sent successfully, emails seller that the order was auto-fulfilled.
+ * Returns true if fulfillment email sent to buyer; otherwise false.
+ */
+async function autoFulfillDigitalOrder(session) {
+  try {
+    const linkId = session.metadata?.linkId;
+    const productId = session.metadata?.productId;
+    const sellerId = session.metadata?.sellerId;
+    if (!productId || !sellerId) return false;
+
+    const [productSnap, sellerSnap, linkSnap] = await Promise.all([
+      db.collection('products').doc(productId).get(),
+      db.collection('sellers').doc(sellerId).get(),
+      linkId ? db.collection('links').doc(linkId).get() : Promise.resolve({ exists: false })
+    ]);
+    if (!productSnap.exists || !sellerSnap.exists) return false;
+
+    const product = productSnap.data();
+    const seller = sellerSnap.data();
+    const link = linkSnap.exists ? linkSnap.data() : null;
+
+    // ADD: normalize digital (fallback to legacy digitalFileUrl)
+    const digital =
+      product.digitalDownload ||
+      link?.digitalDownload ||
+      (product.digitalFileUrl ? buildDigitalDownloadFromUrl(product.digitalFileUrl) : null) ||
+      (link?.digitalFileUrl ? buildDigitalDownloadFromUrl(link.digitalFileUrl) : null);
+
+    if (!digital) return false;
+
+    const buyerEmail = session.customer_details?.email || session.customer_email || null;
+    if (!buyerEmail) return false;
+
+    // Prepare attachment from storagePath or contentUrl
+    let attachment = null;
+
+    if (digital.storagePath) {
+      const fileRef = bucket.file(digital.storagePath);
+      const [buffer] = await fileRef.download();
+      const base64 = Buffer.from(buffer).toString('base64'); // Resend expects base64
+      attachment = {
+        filename: digital.fileName || 'download',
+        content: base64,
+        contentType: digital.contentType || 'application/octet-stream'
+      };
+    } else if (digital.contentUrl) {
+      // Explicit fetch with Node 18+ or dynamic import fallback
+      const doFetch = global.fetch ? global.fetch.bind(global) : (await import('node-fetch')).default;
+      const resp = await doFetch(digital.contentUrl);
+      if (resp.ok) {
+        const ab = await resp.arrayBuffer();
+        const buffer = Buffer.from(ab);
+        const base64 = buffer.toString('base64'); // Resend expects base64
+        attachment = {
+          filename: digital.fileName || 'download',
+          content: base64,
+          contentType: digital.contentType || resp.headers.get('content-type') || 'application/octet-stream'
+        };
+      } else {
+        console.warn('Failed to fetch contentUrl for attachment:', digital.contentUrl, resp.status);
+      }
+    }
+
+    const buyerHtml = generateEmailTemplate({
+      appName: 'InstaPay',
+      title: 'Your download is ready',
+      message: `Thanks for your purchase of <strong>${product.title}</strong>. Your file is attached.`,
+      details: `
+        ${product.image_url ? `<img src="${product.image_url}" alt="${product.title}" style="max-width:100%; border-radius:8px; margin-bottom:12px;" />` : ''}
+        <div>Order total: ${formatPrice(session.amount_total, product.currency || 'usd')}</div>
+        ${(!attachment && digital.contentUrl) ? `<div style="margin-top:8px;">If the attachment is missing, you can also download your file here: <a href="${digital.contentUrl}">${digital.contentUrl}</a></div>` : ''}
+      `
+    });
+
+    await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
+      to: buyerEmail,
+      subject: `Your ${product.title} download`,
+      html: buyerHtml,
+      ...(attachment ? { attachments: [attachment] } : {})
+    });
+
+    const sellerHtml = generateEmailTemplate({
+      appName: 'InstaPay',
+      title: 'Your order was automatically fulfilled',
+      message: `An order for <strong>${product.title}</strong> was automatically fulfilled via digital delivery.`,
+      details: `
+        <div>Buyer: ${buyerEmail}</div>
+        <div>Amount: ${formatPrice(session.amount_total, product.currency || 'usd')}</div>
+        ${product.image_url ? `<div style="margin-top:12px;"><img src="${product.image_url}" alt="${product.title}" style="max-width:100%; border-radius:8px;" /></div>` : ''}
+      `
+    });
+
+    await resend.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || 'no-reply@instapay.app',
+      to: seller.email,
+      subject: 'Your order was automatically fulfilled',
+      html: sellerHtml
+    });
+
+    return true;
+  } catch (err) {
+    console.error('autoFulfillDigitalOrder failure:', err);
+    return false;
+  }
 }
 
 // Serve the uploaded files statically
@@ -508,13 +635,17 @@ app.post('/api/sellers/onboard', verifyFirebaseToken, async (req, res) => {
 app.post('/api/products', async (req, res) => {
   try {
     const {
-      sellerId, title, description, price_cents, currency,
+      sellerId, email, title, description, price_cents, currency,
       image_url, inventory, checkoutSchema,
       digitalFileUrl // optional
     } = req.body;
 
-    if (!sellerId || !title) {
-      return res.status(400).json({ error: 'sellerId and title are required' });
+    const check = await resolveVerifiedSellerFromEmailOrId({ email: email?.toLowerCase?.(), sellerId });
+    if (!check.ok) {
+      if (check.code === 'EMAIL_NOT_VERIFIED' || check.code === 'NOT_FOUND') {
+        return res.status(403).json({ error: 'EMAIL_NOT_VERIFIED', requiresEmailVerification: true });
+      }
+      return res.status(400).json({ error: 'seller required' });
     }
 
     const productRef = db.collection('products').doc();
@@ -535,7 +666,7 @@ app.post('/api/products', async (req, res) => {
 
     const product = {
       productId: productRef.id,
-      sellerId,
+      sellerId: check.seller.sellerId || check.seller.id,
       title,
       description: description || '',
       // price_cents is now optional to support auction-only flows
@@ -593,6 +724,14 @@ app.post('/api/links', async (req, res) => {
     const { productId, sellerId, email, expiresAt, digitalFileUrl, auction } = req.body;
     if (!productId) return res.status(400).json({ error: 'productId required' });
 
+    const check = await resolveVerifiedSellerFromEmailOrId({ email: email?.toLowerCase?.(), sellerId });
+    if (!check.ok) {
+      if (check.code === 'EMAIL_NOT_VERIFIED' || check.code === 'NOT_FOUND') {
+        return res.status(403).json({ error: 'EMAIL_NOT_VERIFIED', requiresEmailVerification: true });
+      }
+      return res.status(400).json({ error: 'seller required' });
+    }
+
     const productSnap = await db.collection('products').doc(productId).get();
     if (!productSnap.exists) return res.status(404).json({ error: 'product not found' });
     const product = productSnap.data();
@@ -634,8 +773,8 @@ app.post('/api/links', async (req, res) => {
     const linkDoc = {
       linkId,
       productId,
-      sellerId: sellerId || product.sellerId,
-      email: email || null,
+      sellerId: check.seller.sellerId || check.seller.id,
+      email: check.seller.email,
       createdAt: new Date().toISOString(),
       // If auction provided, force expiresAt to endsAt
       expiresAt: auctionCfg?.endsAt || expiresAt || null,
@@ -646,8 +785,7 @@ app.post('/api/links', async (req, res) => {
 
     await db.collection('links').doc(linkId).set(linkDoc);
 
-    const baseUrl = process.env.FRONTEND_BASE_URL || `http://localhost:${process.env.PORT || 4000}`;
-    const pageUrl = `${baseUrl}/p/${linkId}${hasDigital ? '?digital=1' : ''}`;
+    const pageUrl = `${baseUrl()}/p/${linkId}${hasDigital ? '?digital=1' : ''}`;
 
     res.json({ linkId, pageUrl, hasDigital, auction: auctionCfg || null });
   } catch (err) {

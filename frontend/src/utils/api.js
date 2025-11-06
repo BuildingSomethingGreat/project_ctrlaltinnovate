@@ -5,46 +5,30 @@ const API_BASE = 'https://ctrlaltinnovate-64f4a6aee6b6.herokuapp.com';
 
 const API_KEY = process.env.REACT_APP_FIREBASE_API_KEY;
 
-async function callApi(endpoint, options = {}) {
-  console.log('Hey');
-  console.log(`Calling API: ${endpoint} with options:`, options); // Debug log
+async function callApi(path, init = {}) {
+  const base = process.env.REACT_APP_BACKEND_BASE_URL || '';
   const headers = {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${API_KEY}`,
-    ...options.headers
+    ...(init.headers || {})
   };
-
-  console.log('API_BASE', API_BASE);
-
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'API request failed');
+  const res = await fetch(`${base}${path}`, { ...init, headers });
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  if (!res.ok) {
+    throw new Error(json.error || json.message || `HTTP ${res.status}`);
   }
-
-  return response.json();
+  return json;
 }
 
 export async function createProduct(data) {
-  const product = await callApi('/api/products', {
+  return callApi('/api/products', {
     method: 'POST',
     body: JSON.stringify(data)
   });
-
-  console.log('Created product:', product); // Debug log
-  return product;
 }
 
-export async function createPaymentLink(dataOrProductId, sellerId, email) {
-  // Support both old signature and new object payload
-  const payload = typeof dataOrProductId === 'object'
-    ? dataOrProductId
-    : { productId: dataOrProductId, sellerId, email };
-
+export async function createPaymentLink(payload) {
+  // payload should include { productId, sellerId?, email? }
   return callApi('/api/links', {
     method: 'POST',
     body: JSON.stringify(payload)
@@ -71,4 +55,15 @@ export async function uploadDigital(productId, file) {
   });
 
   return res; // { digitalDownload }
+}
+
+export async function resolveSeller(email) {
+  return callApi(`/api/sellers/resolve?email=${encodeURIComponent(email)}`, { method: 'GET' });
+}
+
+export async function requestMagicLink(email) {
+  return callApi('/api/sellers/request-magic-link', {
+    method: 'POST',
+    body: JSON.stringify({ email })
+  });
 }

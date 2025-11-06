@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { createProduct, createPaymentLink, createSeller, uploadDigital } from '../utils/api'; // add uploadDigital
+import { createProduct, createPaymentLink, resolveSeller, requestMagicLink, createSeller, uploadDigital } from '../utils/api';
 
 function ProductForm() {
   const [formData, setFormData] = useState({
@@ -32,6 +32,7 @@ function ProductForm() {
   const [validationErrors, setValidationErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [info, setInfo] = useState('');
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -71,6 +72,7 @@ function ProductForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setInfo('');
 
     try {
       const priceRequired = !formData.auctionEnabled;
@@ -84,60 +86,45 @@ function ProductForm() {
         return;
       }
 
-      // Optional: simple future-date check for non-auction expiration
-      if (!formData.auctionEnabled && formData.expirationDate) {
-        const exp = new Date(formData.expirationDate);
-        if (isNaN(exp.getTime()) || exp <= new Date()) {
-          setValidationErrors((v) => ({ ...v, expirationDate: 'Expiration must be a future date/time' }));
-          setLoading(false);
-          return;
-        }
+      // 1) Resolve seller and ensure verified
+      const { seller } = await resolveSeller(formData.sellerEmail);
+      if (!seller || !seller.emailVerified) {
+        console.log(formData.sellerEmail)
+        await requestMagicLink(formData.sellerEmail);
+        setInfo('We sent a verification link to your email. Please verify to continue.');
+        setLoading(false);
+        return;
       }
 
+      // 2) Image upload (optional)
       let finalImageUrl = formData.imageUrl;
-
-      // If an image file is uploaded, upload it to the server
       if (formData.imageFile) {
         finalImageUrl = await handleImageUpload(formData.imageFile);
       }
 
-      // Create seller
-      const sellerData = formData.sellerEmail;
-      const { seller } = await createSeller(sellerData); // Use createSeller from api.js
-      console.log('Seller created:', seller); // Debug log
-
-      // Create product
+      // 3) Create product
       const productData = {
-        sellerId: seller.sellerId, // Use the created sellerId
+        sellerId: seller.sellerId,
+        email: seller.email, // for server-side checks (optional)
         title: formData.productName,
         description: formData.description,
-        currency: (formData.currency || 'USD').toLowerCase(),
-        image_url: finalImageUrl,
+        price_cents: priceRequired ? Math.round(parseFloat(formData.price) * 100) : 0,
+        currency: formData.currency.toLowerCase(),
+        image_url: finalImageUrl || null,
         checkoutSchema: formData.checkoutSchema,
-        // include price only when provided (auction may omit)
-        ...(formData.price ? { price_cents: Math.round(parseFloat(formData.price) * 100) } : {}),
-        // optional digital URL passthrough
-        ...(formData.digitalFileUrl ? { digitalFileUrl: formData.digitalFileUrl } : {})
+        digitalFileUrl: formData.digitalFileUrl || null
       };
+      const { product } = await createProduct(productData);
 
-      const { product } = await createProduct(productData); // Use createProduct from api.js
-      console.log('Product created:', product); // Debug log
-
-      // Upload digital file (optional) AFTER product exists so we can scope to productId
-      if (formData.digitalFile) {
-        await uploadDigital(product.productId, formData.digitalFile);
-      }
-
-      // Create payment link
+      // 4) Create payment link
       const paymentLinkData = {
         productId: product.productId,
-        sellerId: product.sellerId,
-        email: formData.sellerEmail,
-        // Only send expiresAt for non-auction links
+        sellerId: seller.sellerId,
+        email: seller.email,
         expiresAt: !formData.auctionEnabled && formData.expirationDate
           ? new Date(formData.expirationDate).toISOString()
           : null,
-        digitalFileUrl: formData.digitalFileUrl || null, // NEW
+        digitalFileUrl: formData.digitalFileUrl || null,
         auction: formData.auctionEnabled ? {
           enabled: true,
           endsAt: formData.auctionEndsAt,
@@ -145,13 +132,10 @@ function ProductForm() {
           minIncrement_cents: formData.auctionMinIncrement ? Math.round(parseFloat(formData.auctionMinIncrement) * 100) : undefined
         } : undefined
       };
+      const { pageUrl, onboardingUrl } = await createPaymentLink(paymentLinkData);
 
-      console.log('Creating payment link with data:', paymentLinkData); // Debug log
-      const { pageUrl, onboardingUrl } = await createPaymentLink(paymentLinkData); // Use createPaymentLink from api.js
-
-      // Update preview link and onboarding link
       setPreviewLink(pageUrl);
-      setOnboardingLink(onboardingUrl || ''); // Set onboarding link if available
+      setOnboardingLink(onboardingUrl || '');
     } catch (err) {
       console.error('Error creating payment link:', err);
       setError(err.message || 'Failed to create payment link');
@@ -381,6 +365,7 @@ function ProductForm() {
               {loading ? 'Creating...' : 'Generate Link'}
             </button>
           </form>
+          {info && <div style={styles.small}>{info}</div>}
           {error && <div style={styles.error}>Error: {error}</div>}
         </div>
 
@@ -525,6 +510,11 @@ const styles = {
     fontWeight: '600',
     cursor: 'pointer',
     marginTop: '16px'
+  },
+  small: {
+    color: '#475569',
+    fontSize: '14px',
+    marginTop: '8px'
   }
 };
 
