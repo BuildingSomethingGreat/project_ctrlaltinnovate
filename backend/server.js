@@ -157,12 +157,56 @@ async function findSellerByEmail(email) {
   return { id: doc.id, ...doc.data() };
 }
 
+// Lightweight ledger + balance helpers
+async function addLedgerEntry(sellerId, entry) {
+  const ref = db.collection('sellers').doc(String(sellerId)).collection('ledger').doc();
+  const doc = { id: ref.id, createdAt: new Date().toISOString(), ...entry };
+  await ref.set(doc);
+  return doc;
+}
+
+async function creditSellerBalance(sellerId, amount_cents, context = {}) {
+  const sRef = db.collection('sellers').doc(String(sellerId));
+  let newBalance = 0;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(sRef);
+    if (!snap.exists) throw new Error('Seller not found');
+    const data = snap.data() || {};
+    const prev = data.balance?.available_cents || 0;
+    newBalance = Math.max(0, prev + (amount_cents || 0));
+    tx.set(
+      sRef,
+      {
+        balance: {
+          available_cents: newBalance,
+          lastUpdatedAt: new Date().toISOString(),
+          lastDelta_cents: amount_cents || 0
+        }
+      },
+      { merge: true }
+    );
+  });
+  await addLedgerEntry(sellerId, {
+    type: 'purchase.completed',
+    amount_cents: amount_cents || 0,
+    ...context
+  });
+  return newBalance;
+}
+
 const app = express();
 
 // Serve static files from the React frontend app
 app.use(express.static(path.join(__dirname, '../frontend/build')));
 
+// Place these near the VERY TOP, right after you create `app` and before any route definitions.
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// Helper alias if some places still call addLedger()
+if (typeof addLedger === 'undefined' && typeof addLedgerEntry === 'function') {
+  global.addLedger = addLedgerEntry;
+}
 
 // Webhook stays BEFORE JSON parsing (needs raw body)
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
@@ -185,211 +229,280 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
       case 'checkout.session.completed': {
         const session = event.data.object;
 
-        // Extract metadata from the session
-        const { sellerId, productId } = session.metadata;
-
-        // Reference the seller in the database
-        const sellerSnap = await db.collection('sellers').doc(sellerId).get();
-        if (!sellerSnap.exists) {
-          console.error(`Seller not found: ${sellerId}`);
-          return res.status(404).send({ error: 'Seller not found' });
-        }
-        const seller = sellerSnap.data();
-
-        // Reference the product in the database
-        const productSnap = await db.collection('products').doc(productId).get();
-        if (!productSnap.exists) {
-          console.error(`Product not found: ${productId}`);
-          return res.status(404).send({ error: 'Product not found' });
-        }
-        const product = productSnap.data();
-
-        // Send email to seller
-        const emailHtml = generateEmailTemplate({
-          appName: 'CtrlAltInnovate',
-          title: 'New Order Received!',
-          message: `A customer has purchased your product: ${product.title}.`,
-          details: `Order Amount: $${(session.amount_total / 100).toFixed(2)}`
-        });
-
-        await resend.emails.send({
-          from: 'ctrlaltinnovate@notifications.edwardstechnology.app',
-          to: seller.email,
-          subject: 'New Order Received!',
-          html: emailHtml
-        });
-
-        // Initiate a payout to the seller
-        try {
-          const payout = await stripe.transfers.create({
-            amount: session.amount_total, // Total amount in cents
-            currency: session.currency,
-            destination: seller.stripeAccountId, // Seller's Stripe account ID
-            metadata: {
-              productId,
-              sellerId,
-              orderId: session.payment_intent || session.id
-            }
-          });
-          console.log('Payout initiated:', payout);
-        } catch (err) {
-          console.error('Failed to create payout:', err);
+        // Idempotency: ensure we don’t double-credit
+        const paymentKey = String(session.payment_intent || session.id);
+        const orderRef = db.collection('orders').doc(paymentKey);
+        const existing = await orderRef.get();
+        if (existing.exists && existing.data()?.status === 'credited') {
+          break; // already processed
         }
 
-        // Update the product document to set isSold to true
-        const productRef = db.collection('products').doc(productId);
-        await productRef.update({ isSold: true });
+        // Resolve seller/product metadata
+        const meta = session.metadata || {};
+        let { sellerId, productId, linkId } = meta;
 
-        // Save the order details in the database
-        const orderRef = db.collection('orders').doc(session.payment_intent || session.id);
-        const orderDoc = {
-          orderId: session.payment_intent || session.id,
-          checkoutSessionId: session.id,
-          linkId: session.metadata?.linkId,
-          productId,
-          sellerId,
-          amount_total: session.amount_total,
-          currency: session.currency,
-          buyer_email: session.customer_details?.email || null,
-          shipping: session.shipping || null,
-          status: 'completed',
-          createdAt: new Date().toISOString()
-        };
-        await orderRef.set(orderDoc);
-
-        // ADD: auto-fulfill digital orders (buyer + seller notifications)
-        try {
-          const fulfilled = await autoFulfillDigitalOrder(session);
-          if (!fulfilled) {
-            console.log('No digital download to fulfill or buyer email missing.');
+        // Fallback: fetch PaymentIntent metadata if needed
+        if (!sellerId && session.payment_intent) {
+          try {
+            const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
+            sellerId = sellerId || pi.metadata?.sellerId;
+            productId = productId || pi.metadata?.productId;
+            linkId = linkId || pi.metadata?.linkId;
+          } catch (e) {
+            console.error('Failed to fetch PI metadata', e);
           }
-        } catch (e) {
-          console.error('Auto-fulfillment error:', e);
         }
 
-        // Credit full amount to seller balance (adjust if you apply fees)
-        const gross = session.amount_total || 0;
-        await adjustSellerBalance(sellerId, gross, 'checkout.session.completed');
-        await addLedger(sellerId, {
-          type: 'purchase.completed',
+        if (!sellerId) {
+          console.error('Missing sellerId in metadata; cannot credit balance');
+          break;
+        }
+
+        const amountTotal = session.amount_total || 0;
+        const bps = Number(process.env.PLATFORM_FEE_BPS || 0); // e.g. 250 = 2.50%
+        const fee_cents = Math.round((amountTotal * bps) / 10000);
+        const net_cents = Math.max(0, amountTotal - fee_cents);
+
+        // Credit seller’s balance and write ledger
+        await creditSellerBalance(sellerId, net_cents, {
           productId,
+          linkId,
           sessionId: session.id,
-          amount_cents: gross,
-          notes: `Order for ${productId} completed`
+          fee_cents,
+          gross_cents: amountTotal,
+          currency: session.currency
         });
 
-        console.log('Order saved and product updated.');
+        // Mark order as credited
+        await orderRef.set({
+          orderId: paymentKey,
+          sessionId: session.id,
+          sellerId,
+          productId: productId || null,
+          linkId: linkId || null,
+          amount_total_cents: amountTotal,
+          fee_cents,
+          net_cents,
+          currency: session.currency,
+          status: 'credited',
+          createdAt: new Date().toISOString()
+        });
+
+        // NOTE: Removed immediate stripe.transfers.create here.
+        // Payouts are now requested by the seller from their dashboard.
+
         break;
       }
 
       default:
-        console.log(`Unhandled event type ${event.type}`);
-        break;
+        // no-op
     }
+    return res.json({ received: true });
   } catch (err) {
-    console.error('Webhook handler error:', err);
+    console.error('webhook error', err);
+    return res.status(500).send({ error: 'webhook error' });
   }
-
-  res.json({ received: true });
 });
 
-
+// DASHBOARD: remove query-string based payout status (no toast from URL)
 app.get('/dashboard/:sellerId', async (req, res) => {
   try {
     const { sellerId } = req.params;
     const sRef = db.collection('sellers').doc(String(sellerId));
-    const snap = await sRef.get();
-    if (!snap.exists) return res.status(404).send('<h1>Seller not found</h1>');
-    const seller = snap.data();
+    const sSnap = await sRef.get();
+    if (!sSnap.exists) return res.status(404).send('<h1>Seller not found</h1>');
+    const seller = sSnap.data();
     if (!seller.emailVerified) return res.status(404).send('<h1>Seller not verified</h1>');
 
-    // gather summary
     const productsCntSnap = await db.collection('products').where('sellerId', '==', sellerId).count().get();
     const linksCntSnap = await db.collection('links').where('sellerId', '==', sellerId).count().get();
-    const ledgerSnap = await sRef.collection('ledger').orderBy('createdAt', 'desc').limit(15).get();
+    const balanceGross = seller?.balance?.available_cents || 0;
+    const net = calcNetAfterAllFees(balanceGross);
+
+    const ledgerSnap = await sRef.collection('ledger').orderBy('createdAt', 'desc').limit(200).get();
     const ledger = ledgerSnap.docs.map(d => d.data());
 
-    const balance = seller.balance || { available_cents: 0 };
-    const payouts = seller.payouts || {};
-    const fmtUSD = c => '$' + ((c || 0) / 100).toFixed(2);
+    const days = 30;
+    const end = new Date();
+    const start = new Date(); start.setDate(end.getDate() - (days - 1));
+    const dayKey = (d) => d.toISOString().slice(0,10);
+    const daysArr = Array.from({ length: days }).map((_, i) => {
+      const d = new Date(start); d.setDate(start.getDate() + i); return d;
+    });
+    const base = Object.fromEntries(daysArr.map(d => [dayKey(d), { purchases:0, products:0, clicks:0 }]));
+    for (const e of ledger) {
+      if (!e?.createdAt) continue;
+      const k = dayKey(new Date(e.createdAt));
+      if (!base[k]) continue;
+      if (e.type === 'purchase.completed') base[k].purchases += 1;
+      if (e.type === 'product.create') base[k].products += 1;
+      if (e.type === 'click.buy') base[k].clicks += 1;
+    }
+    const series = daysArr.map(d => ({ k: dayKey(d), ...base[dayKey(d)] }));
+    const maxY = Math.max(1, ...series.map(d => Math.max(d.purchases, d.products, d.clicks)));
+    const W = 720, H = 200, PAD = 28;
+    const X = (i) => PAD + (i * (W - PAD*2)) / (series.length - 1 || 1);
+    const Y = (v) => H - PAD - (v * (H - PAD*2)) / maxY;
+    const pathFor = (key) => series.map((d, i) => `${i===0?'M':'L'} ${X(i)} ${Y(d[key])}`).join(' ');
+    const yTicks = [0, Math.round(maxY*0.5), maxY].map(val => ({
+      label: String(val),
+      y: Y(val),
+      yText: Y(val) + 4,
+      x2: W - PAD
+    }));
+    const xLabels = series.map((d,i) => {
+      const step = Math.ceil(series.length/6) || 1;
+      const show = i % step === 0 || i === series.length - 1;
+      return show ? { x: X(i), y: H - 6, label: d.k.slice(5) } : null;
+    }).filter(Boolean);
 
-    const html = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<title>Seller Dashboard – ${seller.email}</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<style>
-  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f7fafc;color:#0f172a;}
-  header{background:linear-gradient(90deg,#166534,#22c55e,#34d399);padding:14px 20px;color:#fff;font-weight:600;}
-  .wrap{max-width:1100px;margin:24px auto;padding:0 20px;}
-  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:28px;}
-  .card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 4px 12px rgba(0,0,0,.06);}
-  h1{margin:0 0 12px;font-size:28px;}
-  .small{font-size:12px;color:#64748b;}
-  ul{list-style:none;margin:0;padding:0;}
-  li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0;}
-  button{background:#22c55e;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;}
-  button:disabled{opacity:.5;cursor:not-allowed;}
-</style>
-</head>
-<body>
-<header>Instapay Dashboard</header>
-<div class="wrap">
-  <h1>${seller.email}</h1>
-  <div class="grid">
-    <div class="card">
-      <div class="small">Available Balance</div>
-      <div style="font-size:30px;font-weight:700">${fmtUSD(balance.available_cents)}</div>
-      <form method="post" action="/api/payouts/request" style="margin-top:12px">
-        <input type="hidden" name="sellerId" value="${sellerId}"/>
-        <button ${balance.available_cents > 0 ? '' : 'disabled'}>Request Payout</button>
-      </form>
-      ${payouts.lastPayoutAt ? `<div class="small" style="margin-top:8px">Last payout: ${new Date(payouts.lastPayoutAt).toLocaleString()}</div>` : ''}
-    </div>
-    <div class="card">
-      <div class="small">Products</div>
-      <div style="font-size:30px;font-weight:700">${productsCntSnap.data().count || 0}</div>
-    </div>
-    <div class="card">
-      <div class="small">Payment Links</div>
-      <div style="font-size:30px;font-weight:700">${linksCntSnap.data().count || 0}</div>
-    </div>
-    <div class="card">
-      <div class="small">Lifetime Payouts</div>
-      <div style="font-size:30px;font-weight:700">${fmtUSD(payouts.lifetimePayouts_cents || 0)}</div>
-    </div>
-  </div>
-  <div class="card">
-    <div style="font-weight:600;margin-bottom:8px">Recent Activity</div>
-    ${ledger.length === 0 ? '<div class="small">No recent activity</div>' : `
-      <ul>
-        ${ledger.map(e => `
-          <li>
-            <div>
-              <div style="font-weight:600">${(e.type||'').replace('.', ' · ')}</div>
-              <div class="small">${new Date(e.createdAt).toLocaleString()}</div>
-              ${e.notes ? `<div class="small">${e.notes}</div>` : ''}
-            </div>
-            <div style="font-weight:600">${e.amount_cents ? fmtUSD(e.amount_cents) : ''}</div>
-          </li>
-        `).join('')}
-      </ul>
-    `}
-  </div>
-</div>
-</body>
-</html>`;
-    res.status(200).send(html);
+    const tpl = fs.readFileSync(path.join(__dirname, 'public', 'templates', 'dashboard.mustache'), 'utf8');
+
+    const html = mustache.render(tpl, {
+      seller: { email: seller.email, sellerId: seller.sellerId || sellerId },
+      stats: {
+        products: productsCntSnap.data().count || 0,
+        links: linksCntSnap.data().count || 0
+      },
+      balance: {
+        grossFormatted: fmtUSD(balanceGross),
+        netFormatted: fmtUSD(net),
+        disablePayout: balanceGross <= 0
+      },
+      payouts: {
+        lastPayoutAt: seller?.payouts?.lastPayoutAt ? fmtDate(seller.payouts.lastPayoutAt) : null,
+        lifetimeFormatted: fmtUSD(seller?.payouts?.lifetimePayouts_cents || 0)
+      },
+      totals: {
+        purchases: series.reduce((a,b)=>a+b.purchases,0),
+        products: series.reduce((a,b)=>a+b.products,0),
+        clicks: series.reduce((a,b)=>a+b.clicks,0)
+      },
+      chart: {
+        W, H, PAD,
+        paths: {
+          purchases: pathFor('purchases'),
+          products: pathFor('products'),
+          clicks: pathFor('clicks')
+        },
+        yTicks,
+        xLabels
+      },
+      recentLedger: (ledger.slice(0, 15) || []).map(e => ({
+        typeDisplay: String(e.type || '').replace('.', ' · '),
+        createdAtFormatted: e.createdAt ? fmtDate(e.createdAt) : '',
+        notes: e.notes || null,
+        amountFormatted: e.amount_cents ? fmtUSD(e.amount_cents) : ''
+      }))
+      // Removed toastMessage / toastErrorMessage (controlled client-side now)
+    });
+    res.setHeader('Content-Type', 'text/html');
+    return res.status(200).send(html);
   } catch (err) {
     console.error('dashboard render error', err);
-    res.status(500).send('<h1>Server error</h1>');
+    return res.status(500).send('<h1>Server error</h1>');
   }
 });
+
+app.get('/terms.html', async (req, res) => {
+  try {
+    const tpl = fs.readFileSync(
+      path.join(__dirname, 'public', 'templates', 'terms.mustache'),
+      'utf8'
+    );
+    const html = mustache.render(tpl, {
+      year: new Date().getFullYear(),
+      effectiveDate: new Date().toLocaleDateString()
+    });
+    res.setHeader('Content-Type', 'text/html');
+    res.status(200).send(html);
+  } catch (err) {
+    console.error('terms render error', err);
+    res.status(500).send('Server error');
+  }
+});
+
+
+/**
+ * GET /onboard/refresh
+ * Regenerates a Stripe Account Link for an existing (incomplete) seller account.
+ * Query: sellerId=...
+ */
+app.get('/onboard/refresh', async (req, res) => {
+  try {
+    const { sellerId } = req.query;
+    if (!sellerId) return res.status(400).send('Missing sellerId');
+
+    const sellerSnap = await db.collection('sellers').doc(String(sellerId)).get();
+    if (!sellerSnap.exists) return res.status(404).send('Seller not found');
+    const seller = sellerSnap.data();
+
+    if (!seller.stripeAccountId) {
+      return res.status(400).send('Seller has no Stripe account yet');
+    }
+
+    // Generate a fresh account link
+    const origin = baseUrl(); // uses existing baseUrl()
+    const accountLink = await stripe.accountLinks.create({
+      account: seller.stripeAccountId,
+      refresh_url: `${origin}/onboard/refresh?sellerId=${encodeURIComponent(sellerId)}`,
+      return_url: `${origin}/onboard/success?sellerId=${encodeURIComponent(sellerId)}`,
+      type: 'account_onboarding'
+    });
+
+    return res.redirect(302, accountLink.url);
+  } catch (err) {
+    console.error('onboard refresh err', err);
+    res.status(500).send('Server error');
+  }
+});
+
+/**
+ * GET /onboard/success
+ * Called by Stripe after onboarding flow returns. We pull latest account info,
+ * update capabilities, then redirect to dashboard.
+ */
+const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
+
+app.get('/onboard/success', async (req, res) => {
+  try {
+    const { sellerId } = req.query;
+    if (!sellerId) return res.status(400).send('Missing sellerId');
+
+    const sellerRef = db.collection('sellers').doc(String(sellerId));
+    const sellerSnap = await sellerRef.get();
+    if (!sellerSnap.exists) return res.status(404).send('Seller not found');
+    const seller = sellerSnap.data();
+    if (!seller.stripeAccountId) return res.status(400).send('Seller missing stripeAccountId');
+
+    // Sync latest Stripe account info (optional but recommended)
+    try {
+      const acct = await stripe.accounts.retrieve(seller.stripeAccountId);
+      await sellerRef.set({
+        stripeAccountStatus: acct.capabilities || {},
+        stripeDetailsSubmitted: !!acct.details_submitted,
+        chargesEnabled: !!acct.charges_enabled,
+        payoutsEnabled: !!acct.payouts_enabled,
+        stripeLastSyncedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (_) {}
+
+    // Redirect to the connected confirmation page (frontend)
+    return res.redirect(302, `${FRONTEND_BASE_URL}/connected.html`);
+  } catch (err) {
+    console.error('onboard success err', err);
+    res.status(500).send('Server error');
+  }
+});
+
 
 // Enable CORS and JSON parsing for all other routes
 app.use(cors());
 app.use(bodyParser.json());
+
+// Ensure body parsers are registered before routes
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Moved below body parser: getEmailFromReq + seller auth/resolve routes
 function getEmailFromReq(req) {
@@ -691,7 +804,11 @@ app.post('/api/sellers/onboard', verifyFirebaseToken, async (req, res) => {
       country: country || 'US',
       email,
       business_type: business_type || 'individual',
-      business_profile: business_profile || undefined
+      business_profile: business_profile || undefined,
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true }
+      }
     });
 
     const newSellerId = sellerId || nanoid(10);
@@ -1141,7 +1258,6 @@ app.post('/api/create-checkout-session', async (req, res) => {
     if (!linkSnap.exists) return res.status(404).send({ error: 'link not found' });
     const link = linkSnap.data();
 
-    // Enforce expiration for any link
     if (link.expiresAt && new Date(link.expiresAt) <= new Date()) {
       return res.status(400).json({ error: 'This link has expired.' });
     }
@@ -1150,12 +1266,21 @@ app.post('/api/create-checkout-session', async (req, res) => {
     if (!pSnap.exists) return res.status(404).send({ error: 'product not found' });
     const product = pSnap.data();
 
-    // If auction is active, block checkout (buy is hidden on page)
     if (link.auction?.enabled && link.auction.status !== 'finalized') {
       return res.status(400).json({ error: 'Auction is active; checkout will be available after the bid closes.' });
     }
 
-    // Determine amount (supports finalized auctions using highest bid; otherwise product price)
+    const sellerId = link.sellerId || product.sellerId;
+    if (!sellerId) return res.status(400).json({ error: 'sellerId could not be derived from link or product' });
+
+    const sellerSnap = await db.collection('sellers').doc(String(sellerId)).get();
+    if (!sellerSnap.exists) return res.status(404).send({ error: 'seller not found' });
+    const seller = sellerSnap.data();
+    if (!seller.stripeAccountId) {
+      // We still require a connected account for future manual payouts.
+      return res.status(400).json({ error: 'seller missing Stripe account' });
+    }
+
     let unitAmount = product.price_cents || null;
     if (link.auction?.enabled && link.auction.status === 'finalized') {
       const highest = await db.collection('links').doc(linkId).collection('bids')
@@ -1176,7 +1301,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
     const origin = process.env.FRONTEND_BASE_URL || 'http://localhost:3000';
     const successUrl = `${origin}/success?session_id={CHECKOUT_SESSION_ID}${hasDigital ? '&digital=1' : ''}`;
 
-    const session = await stripe.checkout.sessions.create({
+    // IMPORTANT: No transfer_data, no application_fee_amount -> funds land in platform account.
+    const sessionParams = {
       line_items: [{
         price_data: {
           currency: product.currency || 'usd',
@@ -1193,15 +1319,15 @@ app.post('/api/create-checkout-session', async (req, res) => {
       success_url: successUrl,
       cancel_url: `${origin}/p/${linkId}`,
       payment_intent_data: {
-        metadata: {
-          linkId,
-          productId: product.productId,
-          sellerId: link.sellerId || product.sellerId
-        }
-      }
-    });
+        // Only metadata; we will compute platform & stripe fees internally
+        metadata: { linkId, productId: product.productId, sellerId }
+      },
+      metadata: { linkId, productId: product.productId, sellerId }
+    };
 
-    await addLedger(link.sellerId, {
+    const session = await stripe.checkout.sessions.create(sessionParams);
+
+    await addLedger(sellerId, {
       type: 'click.buy',
       linkId,
       productId: product.productId,
@@ -1209,10 +1335,10 @@ app.post('/api/create-checkout-session', async (req, res) => {
       notes: `Buy now clicked for "${product.title}"`
     });
 
-    res.json({ url: session.url });
+    return res.json({ url: session.url });
   } catch (err) {
     console.error('checkout session error:', err);
-    res.status(500).send({ error: err.message });
+    return res.status(500).send({ error: err.message });
   }
 });
 
@@ -1552,66 +1678,89 @@ async function adjustSellerBalance(sellerId, delta_cents, note = '') {
   return updated;
 }
 
-// Request payout (seller-initiated)
+// SINGLE payout endpoint (JSON only, no URL query signaling)
 app.post('/api/payouts/request', async (req, res) => {
+  console.log('[payout] incoming', { body: req.body, query: req.query });
   try {
-    const { sellerId } = req.body || {};
+    const sellerId = (req.body && req.body.sellerId) || req.query.sellerId;
     if (!sellerId) return res.status(400).json({ error: 'sellerId required' });
 
     const sRef = db.collection('sellers').doc(String(sellerId));
-    const sSnap = await sRef.get();
-    if (!sSnap.exists) return res.status(404).json({ error: 'seller not found' });
-    const seller = sSnap.data();
+    const snap = await sRef.get();
+    if (!snap.exists) return res.status(404).json({ error: 'seller not found' });
+    const seller = snap.data();
 
     const available = seller?.balance?.available_cents || 0;
     if (available <= 0) return res.status(400).json({ error: 'no funds available' });
 
-    // Ensure seller has a Stripe account
     if (!seller.stripeAccountId) return res.status(400).json({ error: 'seller missing Stripe account' });
 
-    // Create a transfer to the connected account
+    try {
+      const acct = await stripe.accounts.retrieve(seller.stripeAccountId);
+      const transfersStatus = acct.capabilities?.transfers;
+      if (transfersStatus !== 'active') {
+        return res.status(400).json({ error: 'Complete Stripe onboarding to enable transfers', capabilityStatus: transfersStatus });
+      }
+    } catch (e) {
+      console.error('retrieve account err', e);
+    }
+
+    const platformFee = calcPlatformFee(available);
+    const stripeFee = calcStripeFee(available);
+    const netForPayout = Math.max(0, available - stripeFee - platformFee);
+
     const transfer = await stripe.transfers.create({
-      amount: available,
+      amount: netForPayout,
       currency: seller.defaultCurrency || 'usd',
       destination: seller.stripeAccountId,
-      metadata: { sellerId }
+      metadata: { sellerId, payoutType: 'manual_request', gross_cents: available }
     });
 
-    // Zero out balance, update payout stats
     const nowIso = new Date().toISOString();
     await sRef.set({
-      balance: {
-        available_cents: 0,
-        lastUpdatedAt: nowIso,
-        lastDelta_cents: -available
-      },
+      balance: { available_cents: 0, lastUpdatedAt: nowIso, lastDelta_cents: -available },
       payouts: {
         lastPayoutAt: nowIso,
-        lastPayoutAmount_cents: available,
-        lifetimePayouts_cents: (seller.payouts?.lifetimePayouts_cents || 0) + available
+        lastPayoutAmount_cents: netForPayout,
+        lifetimePayouts_cents: (seller.payouts?.lifetimePayouts_cents || 0) + netForPayout
       }
     }, { merge: true });
 
-    await addLedger(sellerId, {
-      type: 'payout.success',
-      amount_cents: -available,
+    await addLedgerEntry(sellerId, {
+      type: 'payout.request',
+      amount_cents: -netForPayout,
+      notes: `Requested payout gross=$${(available/100).toFixed(2)} net=$${(netForPayout/100).toFixed(2)}`,
+      fee_cents: platformFee + stripeFee,
+      gross_cents: available,
       transferId: transfer.id,
-      notes: `Payout of $${(available / 100).toFixed(2)}`
+      currency: seller.defaultCurrency || 'usd'
     });
 
-    res.json({
+    await sendPayoutRequestEmail({
+      sellerId,
+      email: seller.email,
+      gross_cents: available,
+      net_cents: netForPayout
+    });
+
+    return res.json({
       ok: true,
+      message: 'Payout requested successfully',
       transferId: transfer.id,
+      gross_cents: available,
+      platformFee_cents: platformFee,
+      stripeFee_cents: stripeFee,
+      net_cents: netForPayout,
       balance: { available_cents: 0 },
       payouts: {
         lastPayoutAt: nowIso,
-        lastPayoutAmount_cents: available,
-        lifetimePayouts_cents: (seller.payouts?.lifetimePayouts_cents || 0) + available
+        lastPayoutAmount_cents: netForPayout,
+        lifetimePayouts_cents: (seller.payouts?.lifetimePayouts_cents || 0) + netForPayout
       }
     });
   } catch (err) {
     console.error('payout request err', err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -1676,6 +1825,26 @@ app.get('/api/sellers/:sellerId/ledger', async (req, res) => {
   }
 });
 
+// Fee helpers
+function calcStripeFee(amount_cents) { return Math.round((amount_cents || 0) * 0.029) + 30; }
+function calcPlatformFee(amount_cents) { return Math.round((amount_cents || 0) * 0.05); }
+function calcNetAfterAllFees(amount_cents) {
+  const stripeFee = calcStripeFee(amount_cents);
+  const platformFee = calcPlatformFee(amount_cents);
+  return Math.max(0, (amount_cents || 0) - stripeFee - platformFee);
+}
+function fmtUSD(c) { return `$${((c || 0) / 100).toFixed(2)}`; }
+function fmtDate(d) { return new Date(d).toLocaleString(); }
+
+// Update ledger enum usage to include payout.request when adding entries
+// e.g. addLedgerEntry(... { type: 'payout.request', ... })
+
+// Simple email stub (replace with real email service)
+async function sendPayoutRequestEmail({ sellerId, email, gross_cents, net_cents }) {
+  console.log(
+    `PAYOUT REQUEST EMAIL -> lorenzo.edwardstechnology@gmail.com | sellerId=${sellerId} email=${email} gross=$${(gross_cents/100).toFixed(2)} net=$${(net_cents/100).toFixed(2)}`
+  );
+}
 
 const PORT = process.env.PORT || 80;
 app.listen(PORT, () => console.log(`API listening on port ${PORT}`));

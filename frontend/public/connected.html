@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Instapay — Account Connected</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --brand-bg: linear-gradient(90deg, #166534 0%, #22c55e 50%, #34d399 100%);
+        --brand-primary: #22c55e;
+        --text: #0f172a;
+        --muted: #334155;
+        --surface: #ffffff;
+        --surface-2: #f7fafc;
+      }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: var(--surface-2); color: var(--text); }
+      .brandbar {
+        background: var(--brand-bg);
+        color: #fff;
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 2px 12px rgba(0,0,0,.08);
+      }
+      .brand-img {
+        height: 22px;
+        display: block;
+      }
+      .wrap { max-width: 640px; display: flex; flex-direction: column; justify-content: center; align-items: center; margin:  auto; padding: 32px; background: var(--surface); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.08); text-align: center; }
+      h1 { margin: 0 0 12px; font-size: 28px; }
+      p { margin: 8px 0 0; color: var(--muted); }
+      .check {
+        width: 60px; height: 60px; margin: 6px auto 14px; display: block;
+        color: var(--brand-primary);
+      }
+    </style>
+  </head>
+  <body style="display:flex;flex-direction:column;min-height:100vh;">
+
+
+    <div class="wrap ">
+      <img class="brand-img" style="margin-top: 10px; margin-bottom: 10px; width:130px;height:25px; " src="/instapay-logo-text.png" alt="Instapay" />
+
+      <svg class="check" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5" opacity=".25"></circle>
+        <path d="M7 12.5l3.2 3.2L17.5 8.4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+      <h1>Your Stripe account is connected</h1>
+      <p>You can now accept payments and request payouts.</p>
+    </div>
+  </body>
+</html>

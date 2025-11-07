@@ -467,6 +467,89 @@
             "$ref": "#/components/schemas/Auction"
           }
         }
+      },
+      "Balance": {
+        "type": "object",
+        "properties": {
+          "available_cents": { "type": "integer" },
+          "lastUpdatedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "lastDelta_cents": { "type": "integer", "nullable": true }
+        }
+      },
+      "Payouts": {
+        "type": "object",
+        "properties": {
+          "lastPayoutAt": { "type": "string", "format": "date-time", "nullable": true },
+          "lastPayoutAmount_cents": { "type": "integer", "nullable": true },
+          "lifetimePayouts_cents": { "type": "integer", "nullable": true }
+        }
+      },
+      "LedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "type": {
+            "type": "string",
+            "enum": ["product.create", "click.buy", "purchase.completed", "balance.adjust", "payout.success", "payout.request"]
+          },
+          "amount_cents": { "type": "integer" },
+          "notes": { "type": "string", "nullable": true },
+          "productId": { "type": "string", "nullable": true },
+          "linkId": { "type": "string", "nullable": true },
+          "sessionId": { "type": "string", "nullable": true },
+          "transferId": { "type": "string", "nullable": true },
+          "fee_cents": { "type": "integer", "nullable": true },
+          "gross_cents": { "type": "integer", "nullable": true },
+          "currency": { "type": "string", "nullable": true }
+        },
+        "required": ["id", "createdAt", "type"]
+      },
+      "SellerSummary": {
+        "type": "object",
+        "properties": {
+          "seller": {
+            "type": "object",
+            "properties": {
+              "sellerId": { "type": "string" },
+              "email": { "type": "string", "format": "email" },
+              "emailVerified": { "type": "boolean" }
+            }
+          },
+          "balance": { "$ref": "#/components/schemas/Balance" },
+          "payouts": { "$ref": "#/components/schemas/Payouts" },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "products": { "type": "integer" },
+              "links": { "type": "integer" }
+            }
+          },
+          "recentLedger": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/LedgerEntry" }
+          }
+        }
+      },
+      "LedgerList": {
+        "type": "object",
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/LedgerEntry" } }
+        }
+      },
+      "PayoutRequestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "message": { "type": "string" },
+          "transferId": { "type": "string" },
+          "gross_cents": { "type": "integer" },
+          "platformFee_cents": { "type": "integer" },
+          "stripeFee_cents": { "type": "integer" },
+          "net_cents": { "type": "integer" },
+          "balance": { "$ref": "#/components/schemas/Balance" },
+          "payouts": { "$ref": "#/components/schemas/Payouts" }
+        }
       }
     }
   },
@@ -1166,7 +1249,7 @@
       "post": {
         "operationId": "createCheckoutSession",
         "summary": "Create Stripe Checkout Session for a link (auction-aware)",
-        "description": "Creates a Stripe Checkout Session for the provided linkId. If the link has an active auction (status=active), returns 400. If the auction is finalized, the highest bid amount is used as the price. Appends digital=1 to success_url when a digital download exists.",
+        "description": "Creates a Stripe Checkout Session for the linkId. Returns 400 for active auctions. Uses highest bid for finalized auctions. Appends digital=1 to success_url for digital downloads. Funds settle in the platform's Stripe account. Use payouts API to transfer funds to sellers.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1790,6 +1873,7 @@
       "get": {
         "operationId": "renderSellerDashboard",
         "summary": "Server-rendered seller dashboard (HTML)",
+        "description": "Server-rendered dashboard. Payout success/error toasts are controlled client-side via the payouts API; the dashboard URL does not expose payout state.",
         "parameters": [
           { "name": "sellerId", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -1799,6 +1883,121 @@
             "content": { "text/html": { "schema": { "type": "string" } } }
           },
           "404": { "description": "Seller not found or not verified" },
+          "500": { "description": "Server error" }
+        }
+      }
+    },
+    "/api/payouts/request": {
+      "post": {
+        "operationId": "requestPayout",
+        "summary": "Request a manual payout (JSON only; no redirects)",
+        "description": "Requests a payout transfer to the seller's connected account. The server verifies non-zero balance, connected account presence, and Stripe transfers capability. Net amount is computed as amount − (2.9% + $0.30) − 5%.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["sellerId"],
+                "properties": { "sellerId": { "type": "string" } }
+              },
+              "example": { "sellerId": "SELLER_123" }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["sellerId"],
+                "properties": { "sellerId": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Payout initiated; balance zeroed and payouts updated",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PayoutRequestResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "sellerId missing; no funds; missing Stripe account; transfers capability not active",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "404": {
+            "description": "Seller not found",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    },
+    "/api/sellers/{sellerId}/summary": {
+      "get": {
+        "operationId": "getSellerSummary",
+        "summary": "Get seller summary (balance, payouts, counts, recent activity)",
+        "parameters": [
+          { "name": "sellerId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary payload",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SellerSummary" } } }
+          },
+          "404": {
+            "description": "Seller not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "500": { "description": "Server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/onboard/refresh": {
+      "get": {
+        "operationId": "refreshOnboardingLink",
+        "summary": "Regenerate Stripe Express onboarding link for a seller",
+        "parameters": [
+          { "name": "sellerId", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to Stripe onboarding URL",
+            "headers": {
+              "Location": { "schema": { "type": "string", "format": "uri" } }
+            }
+          },
+          "400": { "description": "Missing sellerId or seller has no Stripe account" },
+          "404": { "description": "Seller not found" },
+          "500": { "description": "Server error" }
+        }
+      }
+    },
+    "/onboard/success": {
+      "get": {
+        "operationId": "onboardingSuccess",
+        "summary": "Sync capabilities after onboarding success and redirect to confirmation",
+        "parameters": [
+          { "name": "sellerId", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to frontend connected confirmation page",
+            "headers": {
+              "Location": { "schema": { "type": "string", "format": "uri" } }
+            }
+          },
+          "400": { "description": "Missing sellerId or seller missing stripeAccountId" },
+          "404": { "description": "Seller not found" },
           "500": { "description": "Server error" }
         }
       }

@@ -6,7 +6,10 @@ export const styles = {
       boxShadow: '0 6px 18px rgba(2,6,23,0.08)',
       width: '420px',
       maxWidth: '94vw',
-      margin: '0 auto'
+      margin: '0 auto',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center'
     },
     title: {
       fontSize: '18px',

@@ -9,6 +9,9 @@ function PaymentSuccess() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <div style={styles.card}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20, marginTop: 20 }}>
+          <img src="/instapay-logo-text.png" alt="InstaPay" style={{ width: 130, height: 25 }} />
+        </div>
         <h1 style={styles.title}>Payment Successful!</h1>
         <p style={styles.description}>Thank you for your purchase.</p>
         {isDigital && (

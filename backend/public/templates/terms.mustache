@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>InstaPay — Terms & Conditions</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --fg: #0f172a;
+      --muted: #64748b;
+      --card: #ffffff;
+      --bg: #f7fafc;
+      --accent: #16a34a;
+      --border: #e2e8f0;
+    }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: var(--bg);
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      max-width: 860px;
+      width: 100%;
+      padding: 28px;
+      box-shadow: 0 8px 28px rgba(2,6,23,0.08);
+      border: 1px solid var(--border);
+    }
+    h1 { margin: 0 0 4px 0; font-size: 28px; font-weight: 800; }
+    h2 { margin: 24px 0 8px 0; font-size: 18px; font-weight: 700; }
+    p, li { line-height: 1.6; color: var(--fg); }
+    .muted { color: var(--muted); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .hr { height: 1px; background: var(--border); margin: 16px 0; }
+    ul { padding-left: 18px; margin: 8px 0; }
+    .footer { margin-top: 24px; font-size: 12px; color: var(--muted); text-align: center; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand" style="display:flex;justify-content:center;margin-bottom:12px;">
+        <img src="/instapay-text.png" alt="InstaPay" style="max-width:200px;width:200px;height:auto;" />
+    </div>
+    <h2>Terms and Conditions </h2>
+    <p class="muted">Last updated: <span id="lastUpdated">November 7, 2025</span></p>
+
+    <div class="hr"></div>
+
+    <h2>1. Acceptance of Terms</h2>
+    <p>By creating a seller account or using InstaPay, you agree to these Terms & Conditions and our Privacy Policy. If you do not agree, do not use the Service.</p>
+
+    <h2>2. Accounts and Verification</h2>
+    <p>Sellers must provide a valid email and verify it via magic link. We do not create duplicate seller records for the same email; existing accounts are reused. You are responsible for maintaining the security of your account.</p>
+
+    <h2>3. Payments and Fees</h2>
+    <p>Payments are processed by Stripe. For each successful transaction, the following fees apply:</p>
+    <ul>
+      <li>Stripe processing: 2.9% + $0.30 (USD or your Stripe-supported currency equivalent)</li>
+      <li>InstaPay platform fee: 5% of the transaction amount</li>
+    </ul>
+    <p>Net proceeds after fees are reflected in your seller balance. Fees may be updated with notice.</p>
+
+    <h2>4. Seller Balance and Payouts</h2>
+    <p>Your seller dashboard displays your available balance, last payout date, and payout amounts. You may request payout when your available balance is greater than $0 and your Stripe account is set up and enabled. Payout timing is subject to Stripe’s policies, banking networks, and compliance reviews.</p>
+
+    <h2>5. Products, Digital Goods, and Delivery</h2>
+    <p>Sellers are responsible for product accuracy, fulfillment, and support. For digital downloads, delivery links may be processed post‑checkout; buyers will see messaging that delivery is occurring shortly after purchase.</p>
+
+    <h2>6. Auctions and Bidding</h2>
+    <p>If enabled by the seller, auctions allow buyers to submit bids using their email. Auctions end at the configured time; highest valid bid wins. The winner will receive a payment link to complete purchase. InstaPay is not a party to disputes regarding bids or fulfillment.</p>
+
+    <h2>7. Refunds and Chargebacks</h2>
+    <p>Refunds are handled by the seller in accordance with applicable laws. Chargebacks and disputes may result in debits to the seller’s balance and additional fees according to Stripe’s policies.</p>
+
+    <h2>8. Taxes</h2>
+    <p>Sellers are solely responsible for determining and remitting applicable taxes, duties, and reporting obligations.</p>
+
+    <h2>9. Prohibited Conduct</h2>
+    <p>No illegal content, fraud, IP infringement, harassment, or harmful activities. We may suspend or terminate access for violations.</p>
+
+    <h2>10. Service Changes and Availability</h2>
+    <p>We may modify or discontinue features at any time. We strive for high availability but do not guarantee uninterrupted service.</p>
+
+    <h2>11. Disclaimer and Limitation of Liability</h2>
+    <p>The Service is provided “as is” without warranties of any kind. To the maximum extent permitted by law, InstaPay and its affiliates are not liable for indirect, incidental, or consequential damages.</p>
+
+    <h2>12. Changes to These Terms</h2>
+    <p>We may update these Terms from time to time. Continued use of the Service after updates constitutes acceptance of the revised Terms.</p>
+
+    <h2>13. Contact</h2>
+    <p>Questions? Contact us at <a href="mailto:support@instapay.app">support@instapay.app</a>.</p>
+
+    <div class="footer">© {{year}} InstaPay. All rights reserved.</div>
+  </main>
+</body>
+</html>

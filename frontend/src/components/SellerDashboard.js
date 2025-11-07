@@ -7,6 +7,18 @@ function fmtUSD(cents) {
   return `$${((cents || 0) / 100).toFixed(2)}`;
 }
 
+function stripeFee(cents) {
+  return Math.round((cents || 0) * 0.029) + 30;
+}
+
+function platformFee(cents) {
+  return Math.round((cents || 0) * 0.05);
+}
+
+function netAfterFees(cents) {
+  return Math.max(0, (cents || 0) - stripeFee(cents) - platformFee(cents));
+}
+
 export default function SellerDashboard() {
   const [searchParams] = useSearchParams();
   const emailFromQuery = searchParams.get('email') || '';
@@ -16,6 +28,7 @@ export default function SellerDashboard() {
   const [loading, setLoading] = useState(true);
   const [payoutLoading, setPayoutLoading] = useState(false);
   const [error, setError] = useState('');
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -48,13 +61,16 @@ export default function SellerDashboard() {
   const onPayout = async () => {
     if (!seller) return;
     setPayoutLoading(true);
+    setToast('Submitting payout request…');
     try {
       const r = await requestPayout(seller.sellerId);
-      // refresh summary after payout
+      setToast('Payout request submitted.');
       const sum = await getSellerSummary(seller.sellerId);
       setSummary(sum);
+      setTimeout(() => setToast(null), 4000);
     } catch (e) {
-      alert(e.message || 'Failed to request payout');
+      setToast(`Error: ${e.message}`);
+      setTimeout(() => setToast(null), 5000);
     } finally {
       setPayoutLoading(false);
     }
@@ -65,15 +81,37 @@ export default function SellerDashboard() {
 
   const available = summary?.balance?.available_cents || 0;
   const lastPayoutAt = summary?.payouts?.lastPayoutAt;
+  const net = netAfterFees(available);
 
   return (
     <div style={{ padding: 24 }}>
       <h1 style={styles.title}>InstaPay — Seller Dashboard</h1>
 
+      {toast && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            background: '#166534',
+            color: '#fff',
+            padding: '10px 14px',
+            borderRadius: 8,
+            boxShadow: '0 4px 12px rgba(0,0,0,.15)',
+            fontSize: 14
+          }}
+        >
+          {toast}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 16, marginTop: 12 }}>
         <div style={styles.card}>
-          <div style={styles.small}>Available Balance</div>
+          <div style={styles.small}>Gross Balance</div>
           <div style={{ fontSize: 28, fontWeight: 700 }}>{fmtUSD(available)}</div>
+          <div style={styles.small} title="Estimated after Stripe + platform fees">
+            Net After Fees: <strong>{fmtUSD(net)}</strong>
+          </div>
           <button
             style={{ ...styles.button, marginTop: 12, opacity: available > 0 && !payoutLoading ? 1 : 0.6 }}
             disabled={available <= 0 || payoutLoading}
