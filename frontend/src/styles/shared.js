@@ -53,5 +53,13 @@ export const styles = {
       fontSize: '14px',
       marginTop: '8px',
       textAlign: 'center'
+    },
+    small: { 
+      fontSize: '12px',
+      color: '#6b7280',
+      marginTop: '8px',
+      textAlign: 'center'
     }
+
+    
   };

@@ -1785,6 +1785,23 @@
           }
         }
       }
+    },
+    "/dashboard/{sellerId}": {
+      "get": {
+        "operationId": "renderSellerDashboard",
+        "summary": "Server-rendered seller dashboard (HTML)",
+        "parameters": [
+          { "name": "sellerId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML dashboard page",
+            "content": { "text/html": { "schema": { "type": "string" } } }
+          },
+          "404": { "description": "Seller not found or not verified" },
+          "500": { "description": "Server error" }
+        }
+      }
     }
   }
 }

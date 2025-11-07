@@ -58,12 +58,29 @@ export async function uploadDigital(productId, file) {
 }
 
 export async function resolveSeller(email) {
-  return callApi(`/api/sellers/resolve?email=${encodeURIComponent(email)}`, { method: 'GET' });
+  const res = await fetch(`/api/sellers/resolve?email=${encodeURIComponent(email)}`);
+  if (!res.ok) throw new Error('Failed to resolve seller');
+  return res.json(); // { seller: { sellerId, emailVerified, ... } | null }
 }
 
 export async function requestMagicLink(email) {
   return callApi('/api/sellers/request-magic-link', {
     method: 'POST',
     body: JSON.stringify({ email })
+  });
+}
+
+export async function getSellerSummary(sellerId) {
+  return callApi(`/api/sellers/${encodeURIComponent(sellerId)}/summary`, { method: 'GET' });
+}
+
+export async function getSellerLedger(sellerId, limit = 25) {
+  return callApi(`/api/sellers/${encodeURIComponent(sellerId)}/ledger?limit=${limit}`, { method: 'GET' });
+}
+
+export async function requestPayout(sellerId) {
+  return callApi('/api/payouts/request', {
+    method: 'POST',
+    body: JSON.stringify({ sellerId })
   });
 }

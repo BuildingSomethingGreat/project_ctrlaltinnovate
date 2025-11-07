@@ -162,6 +162,8 @@ const app = express();
 // Serve static files from the React frontend app
 app.use(express.static(path.join(__dirname, '../frontend/build')));
 
+
+
 // Webhook stays BEFORE JSON parsing (needs raw body)
 app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -265,6 +267,17 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
           console.error('Auto-fulfillment error:', e);
         }
 
+        // Credit full amount to seller balance (adjust if you apply fees)
+        const gross = session.amount_total || 0;
+        await adjustSellerBalance(sellerId, gross, 'checkout.session.completed');
+        await addLedger(sellerId, {
+          type: 'purchase.completed',
+          productId,
+          sessionId: session.id,
+          amount_cents: gross,
+          notes: `Order for ${productId} completed`
+        });
+
         console.log('Order saved and product updated.');
         break;
       }
@@ -278,6 +291,100 @@ app.post('/webhook', bodyParser.raw({ type: 'application/json' }), async (req, r
   }
 
   res.json({ received: true });
+});
+
+
+app.get('/dashboard/:sellerId', async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const sRef = db.collection('sellers').doc(String(sellerId));
+    const snap = await sRef.get();
+    if (!snap.exists) return res.status(404).send('<h1>Seller not found</h1>');
+    const seller = snap.data();
+    if (!seller.emailVerified) return res.status(404).send('<h1>Seller not verified</h1>');
+
+    // gather summary
+    const productsCntSnap = await db.collection('products').where('sellerId', '==', sellerId).count().get();
+    const linksCntSnap = await db.collection('links').where('sellerId', '==', sellerId).count().get();
+    const ledgerSnap = await sRef.collection('ledger').orderBy('createdAt', 'desc').limit(15).get();
+    const ledger = ledgerSnap.docs.map(d => d.data());
+
+    const balance = seller.balance || { available_cents: 0 };
+    const payouts = seller.payouts || {};
+    const fmtUSD = c => '$' + ((c || 0) / 100).toFixed(2);
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Seller Dashboard – ${seller.email}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f7fafc;color:#0f172a;}
+  header{background:linear-gradient(90deg,#166534,#22c55e,#34d399);padding:14px 20px;color:#fff;font-weight:600;}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 20px;}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-bottom:28px;}
+  .card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 4px 12px rgba(0,0,0,.06);}
+  h1{margin:0 0 12px;font-size:28px;}
+  .small{font-size:12px;color:#64748b;}
+  ul{list-style:none;margin:0;padding:0;}
+  li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0;}
+  button{background:#22c55e;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-weight:600;cursor:pointer;}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+</style>
+</head>
+<body>
+<header>Instapay Dashboard</header>
+<div class="wrap">
+  <h1>${seller.email}</h1>
+  <div class="grid">
+    <div class="card">
+      <div class="small">Available Balance</div>
+      <div style="font-size:30px;font-weight:700">${fmtUSD(balance.available_cents)}</div>
+      <form method="post" action="/api/payouts/request" style="margin-top:12px">
+        <input type="hidden" name="sellerId" value="${sellerId}"/>
+        <button ${balance.available_cents > 0 ? '' : 'disabled'}>Request Payout</button>
+      </form>
+      ${payouts.lastPayoutAt ? `<div class="small" style="margin-top:8px">Last payout: ${new Date(payouts.lastPayoutAt).toLocaleString()}</div>` : ''}
+    </div>
+    <div class="card">
+      <div class="small">Products</div>
+      <div style="font-size:30px;font-weight:700">${productsCntSnap.data().count || 0}</div>
+    </div>
+    <div class="card">
+      <div class="small">Payment Links</div>
+      <div style="font-size:30px;font-weight:700">${linksCntSnap.data().count || 0}</div>
+    </div>
+    <div class="card">
+      <div class="small">Lifetime Payouts</div>
+      <div style="font-size:30px;font-weight:700">${fmtUSD(payouts.lifetimePayouts_cents || 0)}</div>
+    </div>
+  </div>
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:8px">Recent Activity</div>
+    ${ledger.length === 0 ? '<div class="small">No recent activity</div>' : `
+      <ul>
+        ${ledger.map(e => `
+          <li>
+            <div>
+              <div style="font-weight:600">${(e.type||'').replace('.', ' · ')}</div>
+              <div class="small">${new Date(e.createdAt).toLocaleString()}</div>
+              ${e.notes ? `<div class="small">${e.notes}</div>` : ''}
+            </div>
+            <div style="font-weight:600">${e.amount_cents ? fmtUSD(e.amount_cents) : ''}</div>
+          </li>
+        `).join('')}
+      </ul>
+    `}
+  </div>
+</div>
+</body>
+</html>`;
+    res.status(200).send(html);
+  } catch (err) {
+    console.error('dashboard render error', err);
+    res.status(500).send('<h1>Server error</h1>');
+  }
 });
 
 // Enable CORS and JSON parsing for all other routes
@@ -686,6 +793,14 @@ app.post('/api/products', async (req, res) => {
     };
 
     await productRef.set(product);
+
+    await addLedger(product.sellerId, {
+      type: 'product.create',
+      productId: product.productId,
+      amount_cents: 0,
+      notes: `Created product "${product.title}"`
+    });
+
     res.json({ product });
   } catch (err) {
     console.error('create product err', err);
@@ -1086,6 +1201,14 @@ app.post('/api/create-checkout-session', async (req, res) => {
       }
     });
 
+    await addLedger(link.sellerId, {
+      type: 'click.buy',
+      linkId,
+      productId: product.productId,
+      amount_cents: 0,
+      notes: `Buy now clicked for "${product.title}"`
+    });
+
     res.json({ url: session.url });
   } catch (err) {
     console.error('checkout session error:', err);
@@ -1390,6 +1513,169 @@ app.post('/api/products/:productId/digital', bodyParser.raw({ type: '*/*', limit
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../frontend/build/index.html'));
 });
+
+// Helpers for ledger and balance
+async function addLedger(sellerId, entry) {
+  const ref = db.collection('sellers').doc(String(sellerId)).collection('ledger').doc();
+  const doc = {
+    id: ref.id,
+    createdAt: new Date().toISOString(),
+    ...entry
+  };
+  await ref.set(doc);
+  return doc;
+}
+
+async function adjustSellerBalance(sellerId, delta_cents, note = '') {
+  const sRef = db.collection('sellers').doc(String(sellerId));
+  let updated;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(sRef);
+    if (!snap.exists) throw new Error('Seller not found');
+    const s = snap.data() || {};
+    const balance = s.balance || {};
+    const next = Math.max(0, (balance.available_cents || 0) + (delta_cents || 0));
+    const newBal = {
+      available_cents: next,
+      lastUpdatedAt: new Date().toISOString(),
+      lastDelta_cents: delta_cents || 0
+    };
+    tx.set(sRef, { balance: newBal }, { merge: true });
+    updated = { ...s, balance: newBal };
+  });
+  // ledger for balance adjustments (except payouts, which log separately too)
+  await addLedger(sellerId, {
+    type: 'balance.adjust',
+    amount_cents: delta_cents || 0,
+    notes: note
+  });
+  return updated;
+}
+
+// Request payout (seller-initiated)
+app.post('/api/payouts/request', async (req, res) => {
+  try {
+    const { sellerId } = req.body || {};
+    if (!sellerId) return res.status(400).json({ error: 'sellerId required' });
+
+    const sRef = db.collection('sellers').doc(String(sellerId));
+    const sSnap = await sRef.get();
+    if (!sSnap.exists) return res.status(404).json({ error: 'seller not found' });
+    const seller = sSnap.data();
+
+    const available = seller?.balance?.available_cents || 0;
+    if (available <= 0) return res.status(400).json({ error: 'no funds available' });
+
+    // Ensure seller has a Stripe account
+    if (!seller.stripeAccountId) return res.status(400).json({ error: 'seller missing Stripe account' });
+
+    // Create a transfer to the connected account
+    const transfer = await stripe.transfers.create({
+      amount: available,
+      currency: seller.defaultCurrency || 'usd',
+      destination: seller.stripeAccountId,
+      metadata: { sellerId }
+    });
+
+    // Zero out balance, update payout stats
+    const nowIso = new Date().toISOString();
+    await sRef.set({
+      balance: {
+        available_cents: 0,
+        lastUpdatedAt: nowIso,
+        lastDelta_cents: -available
+      },
+      payouts: {
+        lastPayoutAt: nowIso,
+        lastPayoutAmount_cents: available,
+        lifetimePayouts_cents: (seller.payouts?.lifetimePayouts_cents || 0) + available
+      }
+    }, { merge: true });
+
+    await addLedger(sellerId, {
+      type: 'payout.success',
+      amount_cents: -available,
+      transferId: transfer.id,
+      notes: `Payout of $${(available / 100).toFixed(2)}`
+    });
+
+    res.json({
+      ok: true,
+      transferId: transfer.id,
+      balance: { available_cents: 0 },
+      payouts: {
+        lastPayoutAt: nowIso,
+        lastPayoutAmount_cents: available,
+        lifetimePayouts_cents: (seller.payouts?.lifetimePayouts_cents || 0) + available
+      }
+    });
+  } catch (err) {
+    console.error('payout request err', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Accept form POST for payout from dashboard (same logic as JSON endpoint)
+app.post('/api/payouts/request', express.urlencoded({ extended: true }), async (req, res) => {
+  // reuse existing payout logic or factor into a function
+  const sellerId = req.body.sellerId;
+  // ...existing payout logic...
+  // After success:
+  res.redirect(`/dashboard/${sellerId}`);
+});
+
+// Seller summary (for dashboard)
+app.get('/api/sellers/:sellerId/summary', async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const sRef = db.collection('sellers').doc(String(sellerId));
+    const sSnap = await sRef.get();
+    if (!sSnap.exists) return res.status(404).json({ error: 'seller not found' });
+    const s = sSnap.data();
+
+    const productsSnap = await db.collection('products').where('sellerId', '==', sellerId).count().get();
+    const linksSnap = await db.collection('links').where('sellerId', '==', sellerId).count().get();
+
+    // last 10 ledger entries
+    const ledgerSnap = await sRef.collection('ledger').orderBy('createdAt', 'desc').limit(10).get();
+    const ledger = ledgerSnap.docs.map(d => d.data());
+
+    res.json({
+      seller: {
+        sellerId: s.sellerId || sellerId,
+        email: s.email,
+        emailVerified: !!s.emailVerified
+      },
+      balance: s.balance || { available_cents: 0 },
+      payouts: s.payouts || {},
+      stats: {
+        products: productsSnap.data().count || 0,
+        links: linksSnap.data().count || 0
+      },
+      recentLedger: ledger
+    });
+  } catch (err) {
+    console.error('seller summary err', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Seller ledger (paginated lightweight feed)
+app.get('/api/sellers/:sellerId/ledger', async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit || '25', 10), 100);
+    const sRef = db.collection('sellers').doc(String(sellerId));
+    let q = sRef.collection('ledger').orderBy('createdAt', 'desc').limit(limit);
+    const snap = await q.get();
+    const items = snap.docs.map(d => d.data());
+    res.json({ items });
+  } catch (err) {
+    console.error('seller ledger err', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 const PORT = process.env.PORT || 80;
 app.listen(PORT, () => console.log(`API listening on port ${PORT}`));

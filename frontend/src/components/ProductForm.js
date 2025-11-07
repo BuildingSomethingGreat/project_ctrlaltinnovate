@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { createProduct, createPaymentLink, resolveSeller, requestMagicLink, createSeller, uploadDigital } from '../utils/api';
+import DashboardButton from './DashboardButton';
 
 function ProductForm() {
   const [formData, setFormData] = useState({
@@ -404,6 +405,7 @@ function ProductForm() {
               Buy Now
             </button>
           </div>
+          <DashboardButton email={formData.sellerEmail} />
         </div>
       </div>
     </div>
